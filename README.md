@@ -69,6 +69,7 @@ python safety_selftest.py --data-dir %TEMP%\wv_safety_test
 ## 打包
 
 ```bat
+python -m pip install pyinstaller
 build_onedir.bat
 ```
 
