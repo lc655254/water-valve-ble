@@ -1,0 +1,1942 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>蓝牙水库 · 水控</title>
+<script>
+/* 先把上次的主题/主题色从 localStorage 贴上去（服务端偏好稍后再校正）。
+   否则开屏第一帧永远用默认浅色+默认蓝，切过主题的人会看到图标颜色「跳一下」。 */
+try{
+  var d = localStorage.getItem("wv-dark") === "1";
+  if (d) document.documentElement.classList.add("dark");
+  var a = localStorage.getItem("wv-accent");
+  if (a) document.documentElement.style.setProperty("--accent-base", a);
+}catch(e){}
+</script>
+<style>
+/* ═══ 设计令牌 ═══ */
+:root{
+  --bg:#f5f6f8; --surface:#fff; --surface-2:#eef1f5; --border:#e3e6ec;
+  --text:#0f172a; --muted:#687385; --muted-2:#98a2b3;
+  --accent:#0284c7; --accent-h:#0ea5e9; --danger:#e11d48; --danger-h:#f87171;
+  --ok:#059669; --warn:#d97706;
+  --log-bg:#fff; --log-fg:#475467;
+  --radius:14px; --radius-sm:10px; --radius-xs:8px;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06);
+  --ease:cubic-bezier(.25,.1,.15,1); --t:.18s var(--ease);
+  --spring:cubic-bezier(.34,1.28,.64,1);
+  --font:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",-apple-system,sans-serif;
+  --mono:Consolas,"Cascadia Mono",monospace;
+  /* 品牌图标（开屏大图标 + 标题栏小图标）共用同一个渐变，切换主题也不会两边不一样 */
+  --brand-grad:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 62%,#0b1120));
+  /* 开屏背景：跟随主题 —— 深色主题近黑、浅色主题浅灰，
+     这样开屏图标和标题栏图标所处的背景一致，切主题后不会「看着像两个颜色」 */
+  --welcome-1:#eef1f5; --welcome-2:#e2e8f0;
+}
+.dark{
+  /* 更黑、去蓝：改成中性近黑（zinc 系），不再偏藏青 */
+  --bg:#08090a; --surface:#101113; --surface-2:#16181b; --border:#232528;
+  --text:#e7e8ea; --muted:#84878d; --muted-2:#585b60;
+  --accent:#38bdf8; --accent-h:#0ea5e9; --danger:#f87171; --danger-h:#fca5a5;
+  --ok:#34d399; --warn:#fbbf24;
+  --log-bg:#060708; --log-fg:#9aa0a8;
+  --shadow:0 1px 2px rgba(0,0,0,.55),0 10px 30px rgba(0,0,0,.45);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.55);
+  --welcome-1:#050607; --welcome-2:#0e1216;
+  color-scheme:dark;
+}
+/* ═══ 主题切换：点击处圆形扩散 ═══ */
+::view-transition-old(root){animation:none;}
+::view-transition-new(root){mix-blend-mode:normal;animation:clipReveal .5s var(--ease);}
+@keyframes clipReveal{
+  from{clip-path:circle(0% at var(--mx,50%) var(--my,50%));}
+  to  {clip-path:circle(150% at var(--mx,50%) var(--my,50%));}
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:var(--font);font-size:13.5px;
+  background:var(--bg);color:var(--text);user-select:none;-webkit-font-smoothing:antialiased}
+/* 关键：body 必须是纵向 flex，.main 才能被限制在窗口内 —— 否则日志面板高度无限增长、
+   超出窗口的部分被裁掉，日志就变成“滚不动” */
+body{display:flex;flex-direction:column}
+.titlebar,.statusrow,.grid2{flex:0 0 auto}
+input,textarea,#log{user-select:text}
+
+/* ── 标题栏（仅拖拽区可拖动窗口） ── */
+/* z-index 高于弹窗遮罩：扫描/弹窗期间窗口依然可以拖动（方便把电脑挪近水表） */
+.titlebar{position:relative;z-index:400;height:46px;display:flex;align-items:center;gap:8px;
+  padding:0 8px 0 14px;background:var(--surface);border-bottom:1px solid var(--border)}
+.drag{display:flex;align-items:center;gap:9px;height:100%;padding:0 6px;cursor:default}
+.titlebar .brand{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:8px}
+/* 品牌图标 = 开屏图标落地后的同一形态（20px 圆角渐变块 + 白色水滴），
+   两者逐像素一致，所以开场图标飞过来时看不出任何切换 */
+.brandmark{width:20px;height:20px;flex:0 0 auto;border-radius:6px;display:grid;place-items:center;
+  background:var(--brand-grad);
+  box-shadow:0 2px 7px color-mix(in srgb,var(--accent) 38%,transparent)}
+/* 更新日志弹窗里的人话列表 */
+.chglist{margin:2px 0 2px 20px;padding:0;font-size:13px;line-height:1.9;color:var(--text)}
+.chglist li{margin:0 0 6px}
+.chglist li::marker{color:var(--accent)}
+.brandmark svg{width:11px;height:11px;color:#fff;display:block}
+.titlebar .sub{color:var(--muted);font-size:12px;font-weight:400}
+.spacer{flex:1;height:100%;display:flex;align-items:center;justify-content:center;
+  min-width:0;padding:0 6px}
+/* ── 灵动岛式状态胶囊（标题栏正中间） ──
+   平时是一颗小胶囊（圆点 + 状态），有提示时在原地「展开」成大胶囊，
+   过一会儿自己收回去；宽度/圆角/颜色一起做过渡，所以看起来是同一个东西在变形。 */
+.island{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;
+  border-radius:999px;background:var(--surface-2);border:1px solid var(--border);
+  color:var(--muted);font-size:12px;line-height:1;white-space:nowrap;overflow:hidden;
+  max-width:var(--island-max,460px);pointer-events:none;
+  opacity:1;
+  transition:max-width .46s var(--spring),
+             padding .42s var(--spring),
+             opacity .2s var(--ease),
+             background .25s var(--ease),border-color .25s var(--ease),
+             color .25s var(--ease),box-shadow .25s var(--ease),
+             transform .42s var(--spring)}
+/* 闲置：整个收起来，不占位置也不显示任何状态。
+   ⚠️ opacity 之前漏在过渡列表外，所以一下子就不见了（看着就像没有关闭动画）——
+      现在宽度先缩、透明度稍晚一点淡出，收起来是一个连贯的「缩回去」动作。 */
+.island.hiding,.island.hidden{max-width:0;padding:0;border-width:0;transform:scale(.78);
+  transition:max-width .46s var(--spring),
+             padding .42s var(--spring),
+             opacity .26s var(--ease) .1s,
+             background .25s var(--ease),border-color .25s var(--ease),
+             transform .42s var(--spring)}
+.island.hiding,.island.hidden{opacity:0}
+.island .itext{overflow:hidden;text-overflow:ellipsis;
+  transition:opacity .18s var(--ease),transform .18s var(--ease)}
+.island.hiding .itext{opacity:0;transform:translateX(-6px)}
+.island .idot{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:var(--muted-2);
+  transition:background .25s var(--ease),transform .35s var(--ease)}
+.island.hiding .idot{opacity:0;transform:scale(.4)}
+.island .idot.on{background:var(--ok);animation:pulse 2.4s infinite}
+.island .idot.hot{background:var(--danger);animation:pulse 1.1s infinite}
+.island .idot.ok{background:var(--ok)}
+.island .idot.err{background:var(--danger)}
+.island .idot.warn{background:var(--warn)}
+/* 提示态：胶囊变实、颜色跟着类型走 */
+.island.show{background:var(--surface);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.island.show.ok{border-color:color-mix(in srgb,var(--ok) 50%,var(--border));color:var(--ok)}
+.island.show.err{border-color:color-mix(in srgb,var(--danger) 55%,var(--border));color:var(--danger)}
+.island.show.warn{border-color:color-mix(in srgb,var(--warn) 55%,var(--border));color:var(--warn)}
+.island.show.busy{border-color:color-mix(in srgb,var(--accent) 50%,var(--border));color:var(--accent)}
+.island.hot{background:color-mix(in srgb,var(--danger) 14%,var(--surface-2));
+  border-color:color-mix(in srgb,var(--danger) 45%,var(--border));color:var(--danger);font-weight:600}
+.island.pop{animation:islandPop .5s cubic-bezier(.34,1.35,.64,1)}
+@keyframes islandPop{
+  0%{transform:scale(.82)}
+  55%{transform:scale(1.06)}
+  100%{transform:scale(1)}
+}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 11px;border-radius:999px;
+  font-size:12px;background:var(--surface-2);color:var(--text);white-space:nowrap}
+.chip.ok{color:var(--ok)} .chip.bad{color:var(--danger)}
+.iconbtn{width:32px;height:32px;border:0;border-radius:var(--radius-xs);background:transparent;
+  color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:var(--t)}
+.iconbtn:hover{background:var(--surface-2);color:var(--text)}
+.iconbtn.close:hover{background:var(--danger);color:#fff}
+
+/* ── 状态行 ── */
+.statusrow{display:flex;gap:8px;padding:12px 16px 0;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
+  background:var(--surface);border:1px solid var(--border);font-size:12.5px;color:var(--muted);
+  box-shadow:var(--shadow-sm)}
+.badge b{color:var(--text);font-weight:600}
+.badge.warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--border));color:var(--warn)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.dot.on{background:var(--ok);animation:pulse 2.4s infinite}
+.dot.off{background:var(--muted-2)}
+
+/* ── 卡片 ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:14px 16px}
+.card h3{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:11px;letter-spacing:.3px}
+.row{display:flex;align-items:center;gap:8px}
+.grid2{display:grid;grid-template-columns:1.15fr 1fr;gap:12px;padding:12px 16px 0}
+
+/* ── 控件 ── */
+select,input{font-family:var(--font);font-size:13px;color:var(--text);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius-xs);padding:9px 11px;outline:none;
+  transition:var(--t);min-width:0}
+select:focus,input:focus{border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+select{cursor:pointer}
+.btn{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius-xs);
+  padding:9px 13px;font-size:12.5px;font-family:var(--font);cursor:pointer;transition:var(--t);white-space:nowrap}
+.btn:hover:not(:disabled){background:var(--surface-2);border-color:var(--muted-2)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.btn.primary:hover:not(:disabled){background:var(--accent-h)}
+.btn.danger{background:var(--danger);border-color:transparent;color:#fff}
+.btn.tiny{padding:5px 9px;font-size:11.5px;border-radius:6px}
+
+/* ── 主操作 ── */
+.main{display:grid;grid-template-columns:216px 1fr;grid-template-rows:1fr;gap:12px;
+  padding:12px 16px 16px;flex:1 1 auto;min-height:0;overflow:hidden}
+.actions{display:flex;flex-direction:column;gap:10px;min-height:0;overflow-y:auto}
+.big{height:66px;border:0;border-radius:var(--radius);color:#fff;font-size:17px;font-weight:700;
+  font-family:var(--font);cursor:pointer;transition:var(--t);box-shadow:var(--shadow);
+  display:flex;align-items:center;justify-content:center;gap:9px}
+.big:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.06)}
+.big:active:not(:disabled){transform:translateY(0);filter:brightness(.96)}
+.big:disabled{opacity:.42;cursor:not-allowed}
+.big.open{background:linear-gradient(135deg,var(--accent) 0%,var(--accent-h) 100%)}
+.big.close{background:linear-gradient(135deg,var(--danger) 0%,var(--danger-h) 100%)}
+/* 正在放水：红底 + 呼吸光晕，一眼能看出「这表在出水，别再开水了」 */
+.big.flowing{background:linear-gradient(135deg,var(--danger) 0%,var(--danger-h) 100%);
+  animation:flowPulse 1.9s ease-in-out infinite}
+@keyframes flowPulse{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--danger) 60%,transparent)}
+  55%    {box-shadow:0 0 0 12px color-mix(in srgb,var(--danger) 0%,transparent)}
+}
+/* 执行中：灰蓝、不可点，文案写清正在开还是正在关 */
+.big.doing{background:linear-gradient(135deg,var(--surface-2) 0%,var(--surface) 100%);
+  color:var(--text);border:1px solid var(--border);animation:none}
+.tools{display:flex;flex-direction:column;gap:8px}
+/* ── 省钱账本（整体做矮一点，一屏放下，不用滚） ── */
+.stat-hero{text-align:center;padding:2px 0 4px}
+.stat-hero .num{font-size:28px;font-weight:800;color:var(--ok);line-height:1.05;letter-spacing:-.5px}
+.stat-hero .num small{font-size:14px;font-weight:700;margin-right:2px}
+.stat-hero .lab{font-size:11.5px;color:var(--muted);margin-top:2px}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:7px 0 2px}
+.stat-grid>div{background:var(--surface-2);border-radius:8px;padding:5px 6px;text-align:center}
+.stat-grid b{display:block;font-size:13.5px;color:var(--text)}
+.stat-grid span{font-size:10.5px;color:var(--muted)}
+.stat-sec{font-size:11px;color:var(--muted);margin:8px 0 2px;padding-bottom:2px;
+  border-bottom:1px solid var(--border)}
+.stat-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  font-size:12px;padding:2px 1px;color:var(--text);line-height:1.45}
+.stat-row>span:first-child{color:var(--muted);flex:0 0 auto}
+.stat-row>span:last-child{text-align:right;overflow-wrap:anywhere}
+.stat-row .hi{font-weight:700;color:var(--ok)}
+.stat-row .num2{font-weight:700}
+.stat-row .zero{color:var(--ok);font-weight:600}
+.stat-row .lack{color:var(--muted-2);font-size:11px}
+.stat-note{font-size:10.5px;color:var(--muted-2);line-height:1.55;margin-top:8px;
+  background:var(--surface-2);border-radius:8px;padding:7px 9px}
+.stat-note b{color:var(--muted)}
+.stat-note summary{cursor:pointer;color:var(--muted);font-size:11px;outline:none}
+
+/* ── 日志 ── */
+.logwrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow);display:flex;flex-direction:column;
+  min-height:0;height:100%;overflow:hidden}
+.loghead{display:flex;align-items:center;gap:8px;padding:11px 12px 9px 14px;
+  border-bottom:1px solid var(--border);flex:0 0 auto}
+.loghead h3{font-size:12px;color:var(--muted);font-weight:600;margin:0}
+.logbtns{margin-left:auto;display:flex;gap:6px;align-items:center}
+#log{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 14px 14px;
+  font-family:var(--mono);font-size:11.5px;
+  line-height:1.7;color:var(--log-fg);white-space:pre-wrap;word-break:break-all;cursor:text;
+  background:var(--log-bg)}
+#log .ok{color:var(--ok)} #log .err{color:var(--danger)}
+#log .warn{color:var(--warn)} #log .info{color:var(--accent)}
+#log .tech{color:var(--muted-2);font-size:11px;padding-left:12px;opacity:.9}
+#log::-webkit-scrollbar{width:9px}
+#log::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
+#log::-webkit-scrollbar-thumb:hover{background:var(--muted-2)}
+.logempty{color:var(--muted);font-style:italic}
+
+/* ── 弹窗 ── */
+.mask{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);
+  display:none;place-items:center;z-index:300;padding:14px;box-sizing:border-box}
+.mask.show{display:grid}
+.dialog{width:380px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px;
+  /* 内容再长也不会把标题/按钮顶出屏幕：弹窗自身限高，正文区滚动 */
+  max-height:100%;display:flex;flex-direction:column;overflow:hidden;
+  animation:pop .18s var(--ease)}
+.dialog.wide{width:660px;max-width:calc(100vw - 32px)}
+/* 选择设备这类「列表型」弹窗：高度固定，列表占满中间并自己滚动，
+   标题/提示/按钮都不动 —— 设备多少台都不会把版面顶歪 */
+.dialog.tall{height:min(560px,100%);width:660px;max-width:calc(100vw - 32px)}
+.dialog.tall #mBody{display:flex;flex-direction:column}
+.dialog.tall .devicelist{flex:1 1 auto;min-height:140px;overflow-y:auto;overflow-x:hidden}
+.dialog.tall .devtips{flex:0 0 auto;max-height:34%;overflow-y:auto}
+.dialog h2{font-size:15.5px;margin-bottom:4px;flex:0 0 auto}
+.dialog .desc{color:var(--muted);font-size:12.5px;margin-bottom:14px;line-height:1.6;flex:0 0 auto}
+#mBody{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+#mBody::-webkit-scrollbar{width:9px}
+#mBody::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
+.field{margin-bottom:11px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+.field input{width:100%}
+.field .row{gap:8px}
+.hint{font-size:12px;color:var(--muted);min-height:16px}
+.hint.bad{color:var(--danger)} .hint.good{color:var(--ok)}
+.actions-row{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex:0 0 auto}
+
+/* ── 设备列表：两行式，宽松排布，无横向滚动 ── */
+.devicelist{max-height:none;overflow-y:auto;
+  border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)}
+.devicelist::-webkit-scrollbar{width:9px}
+.devicelist::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
+.devitem{padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;
+  transition:var(--t)}
+.devitem:last-child{border-bottom:0}
+.devitem:hover{background:var(--surface-2)}
+.devitem.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.devitem.suspect{box-shadow:inset 3px 0 0 var(--accent)}
+.devitem .row1{display:flex;align-items:center;gap:10px}
+.devitem .nm{flex:1;font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.devitem.suspect .nm{color:var(--accent)}
+.devitem .sig{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.devitem .sig.weak{color:var(--warn)}
+.devitem .row2{display:flex;align-items:center;gap:8px;margin-top:5px}
+.devitem .mac{font-family:var(--mono);font-size:11.5px;color:var(--muted-2)}
+.devitem .tag{font-size:10.5px;padding:1.5px 8px;border-radius:999px;
+  background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.devitem .tag.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.devitem .tick{color:var(--accent);font-weight:700;opacity:0;margin-left:auto}
+.devitem.sel .tick{opacity:1}
+.devtips{margin-top:12px;padding:10px 13px;border-radius:var(--radius-sm);
+  background:var(--surface-2);font-size:12px;color:var(--muted);line-height:1.75}
+.devtips b{color:var(--text);font-weight:600}
+.devtips .ok{color:var(--ok)} .devtips .warnline{color:var(--warn)}
+
+.devline{display:flex;flex-direction:column;gap:3px;min-width:0}
+.devname{font-family:var(--mono);font-size:12px;font-weight:500;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.devseen{font-size:11.5px;color:var(--muted);line-height:1.55;overflow-wrap:anywhere}
+.devseen i{font-style:normal;color:var(--muted);opacity:.75}
+.devseen.warn{color:var(--warn)}
+.devseen.ok{color:var(--ok)}
+
+/* ── 扫描雷达弹窗 ── */
+.scan-dialog{width:430px;text-align:center}
+.radar{position:relative;width:216px;height:216px;margin:4px auto 16px;border-radius:50%;
+  border:1px solid var(--border);overflow:hidden;
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 10%,transparent) 0%,transparent 72%)}
+.ring{position:absolute;border-radius:50%;border:1px solid var(--border);opacity:.75;inset:0}
+.ring.r2{inset:22%} .ring.r3{inset:44%}
+.sweep{position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg,
+    color-mix(in srgb,var(--accent) 60%,transparent) 0deg,
+    color-mix(in srgb,var(--accent) 16%,transparent) 42deg,
+    transparent 78deg, transparent 360deg);
+  animation:radarSpin 2.1s linear infinite}
+@keyframes radarSpin{to{transform:rotate(360deg)}}
+.core{position:absolute;left:50%;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;
+  border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.blip{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;
+  background:var(--muted-2);animation:blipIn .35s var(--ease)}
+.blip.hot{width:10px;height:10px;margin:-5px 0 0 -5px;background:var(--accent);
+  box-shadow:0 0 10px var(--accent);animation:blipIn .35s var(--ease),blipPulse 1.6s ease-in-out infinite}
+@keyframes blipIn{from{opacity:0;transform:scale(.3)}to{opacity:1;transform:scale(1)}}
+@keyframes blipPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.65}}
+.scanstat{font-size:12.5px;color:var(--muted);line-height:1.8;min-height:44px}
+.scanstat b{color:var(--text)}
+.scanstat .hl{color:var(--accent)}
+
+/* ── 启动欢迎页（图标飞入标题栏：FLIP；背景等图标飞完才淡出） ── */
+.welcome{position:fixed;inset:0;z-index:600;display:grid;place-items:center;cursor:pointer}
+.welcome-bg{position:absolute;inset:0;
+  background:
+    radial-gradient(120% 80% at 50% 34%, color-mix(in srgb,var(--accent) 16%,transparent) 0%, transparent 68%),
+    linear-gradient(160deg,var(--welcome-1) 0%,var(--welcome-2) 55%,var(--welcome-1) 100%);
+  transition:opacity .3s var(--ease)}
+.welcome.exit .welcome-bg{opacity:0}
+.welcome.exit{pointer-events:none}
+.welcome-inner{position:relative;text-align:center;display:flex;flex-direction:column;
+  align-items:center;gap:12px}
+.welcome-icon{width:80px;height:80px;border-radius:22px;display:grid;place-items:center;
+  background:var(--brand-grad);
+  box-shadow:0 14px 44px color-mix(in srgb,var(--accent) 40%,transparent);
+  animation:dropIn .75s var(--ease) both}
+.welcome-icon svg{width:44px;height:44px;color:#fff}
+.welcome-title{font-size:23px;font-weight:700;letter-spacing:3px;color:var(--text);
+  animation:fadeUp .6s var(--ease) .18s both}
+.welcome-sub{font-size:12.5px;letter-spacing:1.5px;color:var(--muted);
+  animation:fadeUp .6s var(--ease) .34s both}
+.welcome-tip{position:absolute;bottom:26px;width:100%;text-align:center;
+  font-size:11.5px;color:var(--muted-2);
+  animation:fadeUp .6s var(--ease) .5s both}
+@keyframes dropIn{
+  from{opacity:0;transform:scale(.55) translateY(14px)}
+  to  {opacity:1;transform:none}
+}
+/* 第一步：文字淡出（背景仍不透明，避免图标悬在界面上很乱） */
+.welcome.text-out .welcome-title,
+.welcome.text-out .welcome-sub,
+.welcome.text-out .welcome-tip{animation:textOut .3s ease both}
+@keyframes textOut{to{opacity:0;transform:translateY(-8px)}}
+/* 第二步：图标飞向标题栏
+   ⚠️ 这里用「动宽高」而不是 scale()：scale 会把 80px 的图层整体降采样，
+   落位那一帧水滴描边被插值糊掉（白色像素几乎消失），和标题栏里 11px 的
+   静态图标对不上。改成动 width/height 后每一帧都重新栅格化，终点与
+   .brandmark 完全一致（20px / 圆角 6px / 阴影 2px 7px / 内嵌 11px 图标）。 */
+.welcome.fly .welcome-icon{position:fixed;z-index:601;margin:0;
+  animation:iconFly .9s cubic-bezier(.4,0,.2,1) both}
+.welcome.fly .welcome-icon svg{animation:iconSvgFly .9s cubic-bezier(.4,0,.2,1) both}
+@keyframes iconFly{
+  from{transform:translate(0,0);width:80px;height:80px;border-radius:22px;
+       box-shadow:0 14px 44px color-mix(in srgb,var(--accent) 40%,transparent)}
+  to  {transform:translate(var(--fx,0),var(--fy,0));width:20px;height:20px;border-radius:6px;
+       box-shadow:0 2px 7px color-mix(in srgb,var(--accent) 38%,transparent)}
+}
+@keyframes iconSvgFly{from{width:44px;height:44px}to{width:11px;height:11px}}
+
+/* ── 主题色（可在右上角 🎨 里改，写在 --accent-base 上） ── */
+:root{--accent-base:#0284c7}
+.dark{--accent-base:#0284c7}
+:root{--accent:var(--accent-base);
+      --accent-h:color-mix(in srgb,var(--accent-base) 72%,#ffffff)}
+.dark{--accent:color-mix(in srgb,var(--accent-base) 62%,#ffffff);
+      --accent-h:color-mix(in srgb,var(--accent-base) 85%,#ffffff)}
+/* 换色面板 */
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:6px 0 2px}
+.sw{height:40px;border-radius:10px;border:2px solid transparent;cursor:pointer;position:relative;
+  transition:var(--t)}
+.sw:hover{transform:translateY(-2px)}
+.sw.cur{border-color:var(--text)}
+.sw.cur::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;
+  color:#fff;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+
+/* ── 账号下拉（自定义，替代原生 select） ── */
+.acctselect{position:relative;flex:1;min-width:0}
+.acctbtn{width:100%;display:flex;align-items:center;gap:8px;background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius-xs);padding:9px 11px;
+  font-family:var(--font);font-size:13px;color:var(--text);cursor:pointer;transition:var(--t);text-align:left}
+.acctbtn:hover{border-color:var(--muted-2);background:var(--surface-2)}
+.acctbtn .who{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--mono);font-size:12.5px}
+.acctbtn .cur{font-size:11px;color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent);
+  padding:2px 7px;border-radius:999px;white-space:nowrap}
+.acctbtn .caret{color:var(--muted);transition:var(--t);flex-shrink:0}
+.acctselect.open .caret{transform:rotate(180deg)}
+.acctmenu{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:120;display:none;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+  box-shadow:0 12px 32px rgba(0,0,0,.18);overflow:hidden;max-height:230px;overflow-y:auto;
+  animation:pop .14s var(--ease)}
+.acctselect.open .acctmenu{display:block}
+.acctitem{display:flex;align-items:center;gap:9px;padding:10px 12px;cursor:pointer;transition:var(--t);
+  font-size:13px;border-bottom:1px solid var(--border)}
+.acctitem:last-child{border-bottom:0}
+.acctitem:hover{background:var(--surface-2)}
+.acctitem .ph{flex:1;font-family:var(--mono);font-size:12.5px}
+.acctitem .tag{font-size:11px;color:var(--ok)}
+.acctitem .tick{color:var(--accent);font-weight:700;opacity:0}
+.acctitem.sel .tick{opacity:1}
+.acctitem.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.acctempty{padding:12px;color:var(--muted);font-size:12.5px;text-align:center}
+
+/* ── 提示胶囊（标题栏正中间，替代原来的浮动提示框） ──
+   原来固定在屏幕下方会挡住日志，现在做成标题栏里那颗「灵动岛」：
+   平时显示连接/放水状态，有提示时原地展开，过几秒自己收回去。 */
+
+/* ── 激活 ── */
+/* 首次使用：全屏欢迎式激活页（大 logo 居中，下面是表单）
+   z-index 特意压在标题栏(400)之下：这样秘钥页显示时，右上角的
+   最小化 / 关闭按钮和拖拽区照样能用（无边框窗口，用户得有地方关它） */
+#gate{position:fixed;inset:0;background:var(--bg);display:none;place-items:center;z-index:350;
+  padding:18px;box-sizing:border-box;overflow:auto}
+#gate.show{display:grid;animation:gateIn .32s var(--ease)}
+@keyframes gateIn{from{opacity:0}to{opacity:1}}
+/* 填秘钥时标题栏只留最小化/关闭：许可天数、主题色、深浅色这些跟首次激活无关，
+   而且许可天数那时还是占位符（🔑 --），显示出来只会让人以为出错了 */
+.gating #licChip,
+.gating #btnAccent,
+.gating #btnTheme{display:none !important}
+.gatecard{width:460px;max-width:100%;display:flex;flex-direction:column;align-items:center;
+  text-align:center;background:transparent;border:0;box-shadow:none;padding:0}
+.gateico{width:86px !important;height:86px !important;border-radius:26px !important;cursor:default;
+  box-shadow:0 18px 52px color-mix(in srgb,var(--accent) 42%,transparent);
+  animation:dropIn .7s var(--spring) both}
+.gateico svg{width:44px !important;height:44px !important}
+.gatecard h1{font-size:22px;margin:20px 0 6px;color:var(--text);letter-spacing:.5px;
+  animation:fadeUp .6s var(--ease) .1s both}
+.gatedesc{font-size:13px;color:var(--muted);margin:0 0 22px;
+  animation:fadeUp .6s var(--ease) .18s both}
+.gatepanel{width:100%;background:var(--surface);border:1px solid var(--border);
+  border-radius:18px;box-shadow:var(--shadow);padding:22px 24px 18px;text-align:left;
+  animation:fadeUp .6s var(--ease) .24s both}
+.gatecard .field{margin-bottom:0}
+.gatecard .hint{min-height:18px;margin:8px 0 10px}
+.gatebtn{width:100%;height:44px;font-size:14.5px;border-radius:12px}
+.gatequit{display:none}
+
+/* ── 新手教程：中间一块「挖空」的遮罩 + 气泡 ── */
+#tour{position:fixed;inset:0;z-index:900;display:none}
+#tour.show{display:block}
+.tour-hole{position:absolute;border-radius:12px;border:2px solid var(--accent);
+  box-shadow:0 0 0 9999px rgba(6,8,12,.66),0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent);
+  transition:left .28s var(--spring),top .28s var(--spring),
+             width .28s var(--spring),height .28s var(--spring)}
+.tour-tip{position:absolute;width:330px;max-width:calc(100vw - 32px);background:var(--surface);
+  border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);
+  padding:15px 16px 13px;transition:left .28s var(--spring),top .28s var(--spring)}
+.tour-step{font-size:11px;color:var(--accent);font-weight:600;margin-bottom:5px}
+.tour-tip h3{font-size:14.5px;margin:0 0 6px;color:var(--text)}
+.tour-tip p{font-size:12.5px;color:var(--muted);line-height:1.65;margin:0 0 12px}
+.tour-btns{display:flex;align-items:center;gap:8px}
+.tour-dots{margin-left:auto;margin-right:auto;display:flex;gap:5px}
+.tour-dots i{width:6px;height:6px;border-radius:50%;background:var(--border);display:block}
+.tour-dots i.on{background:var(--accent);transform:scale(1.25)}
+.devtips details{margin-top:7px}
+.devtips summary{cursor:pointer;color:var(--accent);font-size:12px;outline:none}
+.devtips details[open] summary{margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<!-- 启动欢迎页 -->
+<div class="welcome" id="welcome">
+  <div class="welcome-bg"></div>
+  <div class="welcome-inner">
+    <div class="welcome-icon" id="welcomeIcon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>
+      </svg>
+    </div>
+    <div class="welcome-title">蓝牙水库</div>
+    <div class="welcome-sub">智能水阀控制 · 热水表</div>
+  </div>
+  <div class="welcome-tip">点击任意位置跳过</div>
+</div>
+
+<!-- 标题栏：左半 + 空白区可拖拽，按钮不在拖拽区内 -->
+<div class="titlebar">
+  <span class="brandmark" id="titleIcon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>
+    </svg>
+  </span>
+  <div class="drag pywebview-drag-region">
+    <span class="brand">
+      蓝牙水库 <span class="sub">· 智能水阀控制</span>
+    </span>
+  </div>
+  <div class="spacer pywebview-drag-region">
+    <!-- 灵动岛式状态胶囊：平时显示连接/放水状态，有提示时在原地展开 -->
+    <div class="island" id="island" title="">
+      <span class="idot" id="islandDot"></span>
+      <span class="itext" id="islandText">启动中…</span>
+    </div>
+  </div>
+  <span class="chip" id="licChip">🔑 许可 …</span>
+  <button class="iconbtn" id="btnAccent" title="更换主题色">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+    </svg>
+  </button>
+  <button class="iconbtn" id="btnTheme" title="切换深/浅色">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  </button>
+  <button class="iconbtn" id="btnMin" title="最小化">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round"><path d="M5 12h14"/></svg>
+  </button>
+  <button class="iconbtn close" id="btnClose" title="关闭">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+</div>
+
+<!-- 状态 -->
+<div class="statusrow">
+  <span class="badge" id="bAcct">账号 <b>未登录</b></span>
+  <span class="badge">余额 <b id="sBal">--</b></span>
+  <span class="badge">设备 <b id="sDev">未选择</b></span>
+  <span class="badge"><span class="dot off" id="sDot"></span><b id="sBt">未连接</b></span>
+</div>
+
+<!-- 账号 / 设备 -->
+<div class="grid2">
+  <div class="card">
+    <h3>账号 · 登录 / 切换</h3>
+    <div class="row">
+      <div class="acctselect" id="acctBox">
+        <button class="acctbtn" id="acctBtn" title="展开账号列表">
+          <span class="who" id="acctWho">未登录</span>
+          <span class="cur" id="acctCur" style="display:none">当前</span>
+          <svg class="caret" width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="acctmenu" id="acctMenu"></div>
+      </div>
+      <button class="btn" id="btnSwitch">切换</button>
+      <button class="btn primary" id="btnAdd">新增</button>
+      <button class="btn" id="btnRelogin">重登</button>
+      <button class="btn" id="btnDel">删除</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>设备</h3>
+    <div class="devline">
+      <b id="devLabel" class="devname">未选择设备</b>
+      <span id="devSeen" class="devseen"></span>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:11px">
+      <button class="btn" id="btnRename" title="给这台水表起个名字（显示优先用你的名字）">重命名</button>
+      <button class="btn" id="btnScan" title="扫描附近蓝牙设备并选择你的水表（多轮累积，水表广播稀疏也能扫到）">选择设备</button>
+      <button class="btn" id="btnQuery">查询状态</button>
+    </div>
+  </div>
+</div>
+
+<!-- 主操作 + 日志 -->
+<div class="main">
+  <div class="actions">
+    <!-- 开水 / 关水 合成一个按钮：状态一目了然，避免别人重复开水、重复关水 -->
+    <button class="big open" id="btnWater" title="点一下开水；正在放水时按钮会变红，点一下关水并零扣费结算">
+      <svg id="waterIcon" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>
+      </svg>
+      <span id="waterLabel">开水</span>
+    </button>
+    <div class="tools">
+      <button class="btn" id="btnStats" title="累计省下多少、本次多少、日均/周均/月均/年均">省钱账本</button>
+      <button class="btn" id="btnInfo">账户信息</button>
+      <button class="btn" id="btnBill">本月账单</button>
+    </div>
+  </div>
+  <div class="logwrap">
+    <div class="loghead">
+      <h3>运行日志</h3>
+      <div class="logbtns">
+        <button class="btn tiny" id="btnDetail" title="显示原始帧/随机数等技术细节（人话摘要仍保留）">🔍 详细</button>
+        <button class="btn tiny" id="btnFollow" title="自动滚动到底部">⬇ 自动滚动</button>
+        <button class="btn tiny" id="btnCopyLog">复制</button>
+        <button class="btn tiny" id="btnClearLog">清空</button>
+      </div>
+    </div>
+    <div id="log"><div class="logempty">（日志将显示在这里）</div></div>
+  </div>
+</div>
+
+<!-- 离线状态现在由标题栏的「灵动岛」胶囊显示，不再单独放提示条 -->
+
+<!-- 扫描雷达 -->
+<div class="mask" id="scanMask">
+  <div class="dialog scan-dialog">
+    <h2 id="scanTitle">正在扫描附近设备</h2>
+    <div class="desc" id="scanDesc">请靠近水表，并确保电脑蓝牙已开启</div>
+    <div class="radar">
+      <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div>
+      <div class="sweep"></div>
+      <div class="core"></div>
+      <div id="scanBlips"></div>
+    </div>
+    <div class="scanstat" id="scanProg">正在启动扫描…</div>
+    <div class="actions-row" style="justify-content:center">
+      <button class="btn" id="btnScanCancel">取消扫描</button>
+    </div>
+  </div>
+</div>
+<div class="mask" id="modal">
+  <div class="dialog">
+    <h2 id="mTitle">标题</h2>
+    <div class="desc" id="mDesc"></div>
+    <div id="mBody"></div>
+    <div class="actions-row" id="mActs"></div>
+  </div>
+</div>
+<div id="gate">
+  <div class="gatecard">
+    <span class="brandmark gateico" id="gateIcon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>
+      </svg>
+    </span>
+    <h1>蓝牙水库 · 智能水阀控制</h1>
+    <p class="gatedesc">首次使用需要填写秘钥，填过之后就不再弹出</p>
+    <div class="gatepanel">
+      <div class="field"><label>秘钥</label>
+        <input id="gKey" placeholder="WV-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false"
+               autocomplete="off" maxlength="26"></div>
+      <div class="hint" id="gHint"></div>
+      <button class="btn primary gatebtn" id="btnActivate">激活并开始使用</button>
+    </div>
+    <div class="gatequit hide"></div>
+  </div>
+</div>
+
+<!-- 新手教程：聚光高亮 + 气泡说明 -->
+<div id="tour">
+  <div class="tour-hole" id="tourHole"></div>
+  <div class="tour-tip" id="tourTip">
+    <div class="tour-step" id="tourStep"></div>
+    <h3 id="tourTitle"></h3>
+    <p id="tourDesc"></p>
+    <div class="tour-btns">
+      <button class="btn tiny" id="tourSkip">跳过教程</button>
+      <span class="tour-dots" id="tourDots"></span>
+      <button class="btn tiny primary" id="tourNext">下一步</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { busy:false, wasBusy:false, pending:false, lastLabel:"",
+                logIdx:0, follow:true, detail:false, accounts:[], selPhone:"",
+                polling:false, onboarded:false, seenChangelog:"", waterRunning:null, offlineNow:false,
+                busyLabel:"", deviceInfo:null, clickAt:0 };
+
+/* ── 基础：API / Toast ── */
+let online = true, netFails = 0, offlineShownAt = 0;
+
+/* 连接状态：连续失败才提示，且提示后至少保留 2 秒（避免闪一下就没） */
+async function noteNet(ok){
+  if (ok){
+    netFails = 0;
+    if (!online){
+      online = true;
+      state.offlineNow = false;
+      if (!islandShowing()) islandIdle();
+    }
+    state.offlineNow = false;
+    return;
+  }
+  netFails++;
+  if (netFails >= 3){
+    online = false;
+    state.offlineNow = true;
+    if (!islandShowing()) islandIdle();       // 胶囊里常驻提示「本地服务未连接，重试中…」
+  }
+}
+async function api(path, body, opt={}){
+  const tries = (opt.retry || 0) + 1;
+  const timeout = opt.timeout || 20000;          // 单次请求上限，避免一直挂着
+  for (let i = 0; i < tries; i++){
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), timeout);
+    try{
+      const r = await fetch(path, Object.assign(
+        {signal: ctrl.signal},
+        body === undefined ? {} : {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(body||{})}));
+      clearTimeout(timer);
+      noteNet(true);
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("application/json")) return await r.json();
+      // 非 JSON（405 / 500 之类）：服务是通的，别报成「本地服务无响应」，
+      // 把状态码和原因原样说出来，方便定位（历史上 GET/POST 用错就是这种症状）
+      let brief = "";
+      try{
+        const txt = await r.text();
+        brief = (txt.match(/<title>([^<]*)<\/title>/i) || [, ""])[1] || txt.replace(/\s+/g," ").slice(0, 120);
+      }catch(e){}
+      return {ok:false, http:r.status,
+              msg:`本地接口 ${path} 返回 ${r.status} ${r.statusText || ""}${brief ? "（" + brief.trim() + "）" : ""}`};
+    }catch(e){
+      clearTimeout(timer);
+      if (i < tries - 1){                        // 再试一次（覆盖刚重启等瞬时抖动）
+        await new Promise(res => setTimeout(res, opt.retryDelay || 900));
+        continue;
+      }
+      noteNet(false);
+      // 不把内部记号暴露给界面
+      return {ok:false, offline:true, msg:"本地服务暂时无响应"};
+    }
+  }
+}
+let toastTimer = null, toastNow = "";
+let splashOn = true, splashPending = null;      // 开屏期间不弹提示，结束后补一次
+/* ms = 0 表示常驻（不自动消失），直到被下一条替换或 hideToast() */
+/* 提示统一走标题栏那颗「灵动岛」胶囊（不再用屏幕下方的浮动框，免得挡日志） */
+function toast(msg, kind="", ms=3200){
+  if (splashOn){ splashPending = [msg, kind, ms]; return; }
+  islandShow(msg, kind, ms);
+}
+function hideToast(){ islandIdle(); }
+/* 灵动岛：闲置时显示当前状态，有提示时展开并把内容换成提示 */
+let islandTimer = null, islandHideTimer = null;
+function islandEls(){ return [$("island"), $("islandDot"), $("islandText")]; }
+function islandShowing(){ const el = $("island"); return !!el && el.classList.contains("show"); }
+function islandKind(){ const el = $("island"); return el ? el.className : ""; }
+function islandShow(msg, kind, ms){
+  const [el, dot, txt] = islandEls();
+  if (!el) return;
+  clearTimeout(islandHideTimer);       // 正在收起时来了新消息：直接展开
+  if (msg === toastNow && el.classList.contains("show")){   // 同一条消息重复：只延时
+    if (islandTimer) { clearTimeout(islandTimer); islandTimer = ms > 0 ? setTimeout(islandIdle, ms) : null; }
+    return;
+  }
+  toastNow = msg;
+  el.className = "island show pop " + (kind || "");
+  el.title = msg;
+  dot.className = "idot " + (kind === "ok" ? "ok" : kind === "err" ? "err"
+                           : kind === "warn" ? "warn" : "busy");
+  txt.textContent = msg;
+  clearTimeout(islandTimer);
+  islandTimer = ms > 0 ? setTimeout(islandIdle, ms) : null;
+}
+function islandIdle(){
+  const [el, dot, txt] = islandEls();
+  if (!el) return;
+  clearTimeout(islandTimer); islandTimer = null;
+  toastNow = "";
+  el.title = "";
+  // 这个位置只承担「进度 / 提示」：连接状态在状态行、出水状态在红色按钮上，都不在这儿重复
+  if (state.busy){
+    el.className = "island show busy";
+    dot.className = "idot busy";
+    txt.textContent = (state.busyLabel || "处理中") + "…";
+    return;
+  }
+  if (state.offlineNow){
+    el.className = "island show warn";
+    dot.className = "idot warn";
+    txt.textContent = "本地服务未连接，重试中…";
+    return;
+  }
+  if (el.classList.contains("hidden")) return;   // 已经收好了就别反复重置动画
+  // 收回去也走动画：先淡出+缩回（.hiding 有过渡），过渡结束再彻底隐藏
+  el.className = "island hiding";
+  dot.className = "idot";
+  clearTimeout(islandHideTimer);
+  islandHideTimer = setTimeout(()=>{
+    if (el.classList.contains("hiding")){
+      el.className = "island hidden";
+      txt.textContent = "";
+    }
+  }, 420);
+}
+/* 胶囊不能挤到左边品牌名和右边许可/按钮上，按实际宽度算可用空间 */
+function layoutIsland(){
+  const bar = document.querySelector(".titlebar");
+  const brand = document.querySelector(".titlebar .brand");
+  const chip = $("licChip");
+  if (!bar || !brand || !chip) return;
+  const r = bar.getBoundingClientRect(), a = brand.getBoundingClientRect(),
+        c = chip.getBoundingClientRect();
+  const room = Math.max(140, Math.min(c.left - a.right - 72, r.width - 340));
+  document.documentElement.style.setProperty("--island-max", Math.round(room) + "px");
+}
+
+/* ── 应用内弹窗（替代 prompt/confirm） ── */
+let modalClose = null;
+function dialog({title, desc="", body="", buttons, onMount, wide=false, tall=false}){
+  $("mTitle").textContent = title;
+  $("mDesc").textContent = desc;
+  $("mDesc").style.display = desc ? "block" : "none";
+  $("mBody").innerHTML = body;
+  const _dlg = $("modal").querySelector(".dialog");
+  _dlg.classList.toggle("wide", !!wide);
+  _dlg.classList.toggle("tall", !!tall);
+  const acts = $("mActs"); acts.innerHTML = "";
+  const close = (v) => { $("modal").classList.remove("show"); const r = modalClose; modalClose = null; if (r) r(v); };
+  (buttons||[]).forEach(b => {
+    const el = document.createElement("button");
+    el.className = "btn" + (b.primary ? " primary" : "") + (b.danger ? " danger" : "");
+    el.textContent = b.label;
+    el.onclick = () => b.onClick ? b.onClick(close) : close(null);
+    acts.appendChild(el);
+  });
+  $("modal").classList.add("show");
+  if (onMount) onMount(close);
+  return new Promise(res => { modalClose = res; });
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("modal").classList.contains("show")) {
+    $("modal").classList.remove("show");
+    const r = modalClose; modalClose = null; if (r) r(null);
+  }
+});
+function confirmDialog(title, desc){
+  return dialog({title, desc, buttons:[
+    {label:"取消", onClick:c=>c(false)},
+    {label:"确定", danger:true, primary:true, onClick:c=>c(true)}]});
+}
+
+/* ── 主题与主题色（记忆在后端 ui_prefs.json，重启仍然记得） ── */
+const ACCENTS = [
+  ["#0284c7", "水蓝"], ["#0891b2", "青碧"], ["#059669", "翠绿"], ["#4f46e5", "靛蓝"],
+  ["#7c3aed", "紫罗兰"], ["#db2777", "玫红"], ["#ea580c", "暖橙"], ["#475569", "石墨"],
+];
+let curAccent = "#0284c7";
+function applyAccent(color){
+  curAccent = color || "#0284c7";
+  document.documentElement.style.setProperty("--accent-base", curAccent);
+  try{ localStorage.setItem("wv-accent", curAccent); }catch(e){}
+}
+function applyTheme(theme){
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  localStorage.setItem("wv-dark", theme === "dark" ? "1" : "0");
+}
+function savePrefs(patch){ api("/api/prefs", patch, {retry:1}).catch(()=>{}); }
+
+$("btnTheme").addEventListener("click", (e)=>{
+  document.documentElement.style.setProperty("--mx", e.clientX + "px");
+  document.documentElement.style.setProperty("--my", e.clientY + "px");
+  const next = document.documentElement.classList.contains("dark") ? "light" : "dark";
+  const toggle = ()=>{ applyTheme(next); savePrefs({theme: next}); };
+  if (document.startViewTransition) document.startViewTransition(toggle); else toggle();
+});
+
+$("btnAccent").addEventListener("click", ()=>{
+  const cur = curAccent.toLowerCase();
+  dialog({
+    title: "主题色",
+    desc: "选一个强调色（按钮 / 雷达 / 徽章都会跟着变），会自动记住",
+    body: `<div class="swatches">${
+      ACCENTS.map(([c, n]) => `<div class="sw${c.toLowerCase() === cur ? " cur" : ""}" data-c="${c}"
+        title="${n}" style="background:linear-gradient(135deg,${c},color-mix(in srgb,${c} 62%,#0b1120))"></div>`).join("")
+    }</div>`,
+    buttons: [{label:"完成", primary:true, onClick:c=>c(null)}],
+    onMount: ()=>{
+      document.querySelectorAll(".sw").forEach(el => {
+        el.onclick = ()=>{
+          document.querySelectorAll(".sw").forEach(x=>x.classList.remove("cur"));
+          el.classList.add("cur");
+          applyAccent(el.dataset.c);
+          savePrefs({accent: el.dataset.c});
+        };
+      });
+    }
+  });
+});
+
+/* ── 状态绘制 ── */
+function paintState(s){
+  const acct = $("bAcct");
+  acct.innerHTML = "账号 <b>" + (s.account || "未登录") + "</b>";
+  acct.className = "badge" + (s.account ? "" : " warn");
+  $("sBal").textContent  = s.balance != null ? s.balance + " 元" : "--";
+  $("sDev").textContent  = s.device || "未选择";
+  $("sBt").textContent   = s.connected ? "已连接" : "未连接";
+  $("sDot").className    = "dot " + (s.connected ? "on" : "off");
+  $("licChip").textContent = s.license > 0 ? ("🔑 许可剩余 " + s.license + " 天") : "🔑 许可异常";
+  $("licChip").className = "chip " + (s.license > 0 ? "ok" : "bad");
+  // 设备名：本地别名 > 云端档案名（官方同款接口）> 广播名 > MAC
+  const di = s.device_info || {};
+  state.deviceInfo = di;
+  const seenEl = $("devSeen");
+  if (s.device_mac){
+    $("devLabel").textContent = di.display || s.device_mac;
+    $("devLabel").title = [di.place, s.device_mac].filter(Boolean).join("  ");
+    // 名字来源 + 名字本体（和日志里的「设备档案」用同一个名字）+ 最近扫到
+    let src, nm;
+    if (di.alias){ src = "你起的名字"; nm = di.alias; }
+    else if (di.cloud_full || di.cloud_name){ src = "云端档案名"; nm = di.cloud_full || di.cloud_name; }
+    else if (di.ble_name){ src = "设备广播名"; nm = di.ble_name; }
+    else { src = "尚未命名"; nm = "可点「重命名」起个名字"; }
+    // 还没拿到云端档案：把「为什么没有」说清楚
+    if (!di.cloud_full && !di.cloud_name && !di.alias){
+      src = "设备广播名";
+      const why = !s.account
+        ? "先登录账号，再点「选择设备」选中它"
+        : "已登录 " + s.account + "，但这台表不在该账号名下（换个账号试试）";
+      nm = (di.ble_name || s.device_mac || "") + "（" + why + "，就会显示宿舍 / 房间名）";
+    }
+    const seen = s.device_last_seen;
+    let seenTxt = "";
+    if (seen){
+      const age = seen.age < 60 ? `${seen.age} 秒前`
+                : seen.age < 3600 ? `${Math.round(seen.age/60)} 分钟前`
+                : `${Math.round(seen.age/3600)} 小时前`;
+      const rssi = (seen.rssi === null || seen.rssi === undefined) ? "" : `（${seen.rssi} dBm）`;
+      seenTxt = `最近扫到 ${age}${rssi}`;
+    } else {
+      seenTxt = "本次运行还没扫到过";
+    }
+    seenEl.textContent = "";
+    const tag = document.createElement("i");
+    tag.textContent = src;
+    seenEl.append(tag, document.createTextNode(" " + nm + "  ·  " + seenTxt));
+    seenEl.className = "devseen " + ((seen && seen.rssi >= -80) ? "ok" : "warn");
+  } else {
+    $("devLabel").textContent = "未选择设备";
+    seenEl.textContent = "";
+    seenEl.className = "devseen";
+  }
+
+  // 账号下拉（自定义）
+  state.accounts = s.accounts || [];
+  if (!state.selPhone) state.selPhone = s.account || "";
+  const show = state.accounts.find(a => a.phone === state.selPhone) || state.accounts.find(a => a.current);
+  $("acctWho").textContent = s.account || (show ? show.phone : "未登录");
+  $("acctCur").style.display = s.account ? "inline-block" : "none";
+  $("acctBtn").disabled = !state.accounts.length;
+  const key = state.accounts.map(a => a.phone + (a.current ? "*" : "")).join(",");
+  if ($("acctMenu").dataset.k !== key){
+    $("acctMenu").dataset.k = key;
+    $("acctMenu").innerHTML = state.accounts.length
+      ? state.accounts.map(a => `
+          <div class="acctitem${a.current ? " sel" : ""}" data-phone="${a.phone}">
+            <span class="ph">${a.phone}</span>
+            ${a.current ? '<span class="tag">当前</span>' : ''}
+            <span class="tick">✓</span>
+          </div>`).join("")
+      : `<div class="acctempty">（无账号，点「新增」用短信验证码登录）</div>`;
+    $("acctMenu").querySelectorAll(".acctitem").forEach(el => {
+      el.onclick = async () => {
+        acctClose();
+        const phone = el.dataset.phone;
+        state.selPhone = phone;
+        $("acctWho").textContent = phone;
+        if (phone === s.account) { toast("已经是当前账号"); return; }
+        await act("已切换到 " + phone, "/api/account/switch", {phone});
+      };
+    });
+  }
+
+  // 忙状态、出水状态都只由标题栏那颗胶囊表达（状态行不再重复一遍）
+  state.busy = !!s.busy;
+  const label = s.busy_label || state.lastLabel || "操作";
+  if (s.busy){
+    state.lastLabel = label;
+    // 已有提示（act 的常驻提示/错误提示）就不覆盖，避免闪烁
+    if (!islandShowing()) toast("⏳ " + label + " · 正在执行…", "", 0);
+  } else {
+    if (state.wasBusy){                        // 刚结束
+      state.pending = false;
+      clearTimeout(state.pendingTimer);
+      const name = state.lastLabel || label;
+      // 优先用后端记下的真实结果（开水/关水/查询状态都会记）
+      if (reportAction(s, name, state.clickAt)){ /* 已按真实结果播报 */ }
+      else if (/连接/.test(name)){
+        // 连接类任务必须按真实结果报，不能一见任务结束就打勾
+        //（否则会出现「✓ 自动连接水表 完成」+ 顶部「未连接」这种自相矛盾的画面）
+        if (s.connected){
+          toast("✓ " + name + " 完成 · 已连上水表", "ok", 3200);
+          logNote("✓ " + name + " 完成 · 已连上水表", "ok");
+        } else {
+          toast("⚠ " + name + " 结束 · 还没连上水表", "warn", 4200);
+          logNote("⚠ " + name + " 结束 · 还没连上水表（水表广播稀疏/信号弱），"
+                  + "可点「搜寻水表」或靠近水表后重试", "warn");
+        }
+      } else if (!islandKind().includes("err")){
+        toast("✓ " + name + " 完成", "ok", 3200);
+        logNote("✓ " + name + " 完成", "ok");   // 同时留档到日志面板
+      }
+      state.clickAt = 0;
+    }
+  }
+  state.wasBusy = !!s.busy;
+  state.waterRunning = (s.water_running === true) ? true : (s.water_running === false ? false : null);
+  state.busyLabel = s.busy ? (s.busy_label || "") : "";
+  paintWater(s);
+  if (!islandShowing()) islandIdle();      // 没在播报提示时，胶囊显示当前状态
+  ["btnQuery","btnScan","btnSwitch","btnAdd","btnRelogin","btnDel",
+   "btnInfo","btnBill"].forEach(id => { $(id).disabled = state.busy; });
+}
+/* 开水/关水合成一个按钮：状态由按钮本身 + 标题栏胶囊表达，不再写小字 */
+function paintWater(s){
+  const b = $("btnWater"), t = $("waterLabel");
+  const label = s.busy_label || state.lastLabel || "";
+  const busyOpen  = s.busy && /开水/.test(label);
+  const busyClose = s.busy && /关水/.test(label);
+  if (busyOpen || busyClose){
+    b.className = "big doing";
+    t.textContent = busyOpen ? "正在开水…" : "正在关水…";
+    b.disabled = true;
+    return;
+  }
+  if (state.waterRunning === true){
+    b.className = "big close flowing";
+    t.textContent = "关水";
+  } else {
+    b.className = "big open";
+    t.textContent = "开水";
+  }
+  b.disabled = state.busy;
+}
+/* 账号下拉开合 */
+function acctOpen(){ $("acctBox").classList.add("open"); }
+function acctClose(){ $("acctBox").classList.remove("open"); }
+$("acctBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  $("acctBox").classList.contains("open") ? acctClose() : acctOpen();
+});
+document.addEventListener("click", e => {
+  if (!$("acctBox").contains(e.target)) acctClose();
+});
+async function refresh(){ const s = await api("/api/state"); if (s && s.ok) paintState(s); }
+
+/* ── 日志：人话版 / 详细版 + 可滚动可复制 ── */
+function logLine(box, frag, cls, content){
+  if (!String(content || "").trim()) return 0;
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = content;
+  frag.appendChild(d);
+  return 1;
+}
+function logAppend(lines){
+  const box = $("log");
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  const frag = document.createDocumentFragment();
+  let shown = 0;
+  lines.forEach(entry => {
+    // entry = [cls, 人话文案, 原始文案, 简洁模式是否显示]
+    const cls = entry[0], text = entry[1], raw = entry[2], showSimple = entry[3];
+    if (!state.detail){
+      if (!showSimple) return;                  // 简洁模式：隐藏纯技术细节
+      shown += logLine(box, frag, cls, text);
+      return;
+    }
+    // 详细模式：人话摘要（若有）在上，原始技术行在下（淡色缩进）
+    if (showSimple && text && text !== raw) shown += logLine(box, frag, cls, text);
+    shown += logLine(box, frag, "tech", raw || text);
+  });
+  if (!shown) return;
+  if (box.querySelector(".logempty")) box.innerHTML = "";
+  box.appendChild(frag);
+  while (box.childElementCount > 2000) box.removeChild(box.firstChild);
+  if (state.follow && atBottom) box.scrollTop = box.scrollHeight;
+}
+async function pollLogs(){
+  const r = await api("/api/logs?since=" + state.logIdx);
+  if (r && r.lines && r.lines.length){ state.logIdx = r.next; logAppend(r.lines); }
+}
+/* 把界面操作结果也写进日志面板留档（提示条消失后仍可回看） */
+function logNote(msg, cls=""){
+  try { logAppend([[cls, msg, msg, 1]]); } catch(e){}
+}
+function paintDetail(){
+  const b = $("btnDetail");
+  b.textContent = state.detail ? "🔍 详细 ✓" : "🔍 详细";
+  b.classList.toggle("primary", state.detail);
+}
+$("btnDetail").addEventListener("click", async ()=>{
+  state.detail = !state.detail;
+  localStorage.setItem("wv-detail", state.detail ? "1" : "0");
+  paintDetail();
+  // 重新拉取全部日志并按新视图渲染
+  $("log").innerHTML = "";
+  state.logIdx = 0;
+  await pollLogs();
+  if (state.follow){ const b = $("log"); b.scrollTop = b.scrollHeight; }
+});
+$("log").addEventListener("scroll", ()=>{
+  const box = $("log");
+  const bottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  if (!bottom && state.follow){ state.follow = false; paintFollow(); }
+});
+function paintFollow(){
+  $("btnFollow").textContent = state.follow ? "⬇ 自动滚动" : "⏸ 已暂停";
+  $("btnFollow").classList.toggle("primary", !state.follow);
+}
+$("btnFollow").addEventListener("click", ()=>{
+  state.follow = !state.follow; paintFollow();
+  if (state.follow){ const b = $("log"); b.scrollTop = b.scrollHeight; }
+});
+$("btnClearLog").addEventListener("click", ()=>{ $("log").innerHTML = ""; });
+$("btnCopyLog").addEventListener("click", async ()=>{
+  const text = $("log").innerText;
+  if (!text.trim()) { toast("日志为空", "err"); return; }
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_text){
+    await window.pywebview.api.copy_text(text);
+    toast("✓ 已复制全部日志", "ok");
+  } else {
+    try { await navigator.clipboard.writeText(text); toast("✓ 已复制", "ok"); }
+    catch(e){ toast("复制失败，可手动选择文本", "err"); }
+  }
+});
+
+/* ── 操作 ── */
+/* 用后端记下的「最近一次操作真实结果」播报，避免把「水表没连上」说成「本地服务无响应」，
+   也避免任务失败却报「✓ 完成」。clickAt：只认这次点击之后产生的结果。 */
+function reportAction(s, name, clickAt){
+  const la = s && s.last_action;
+  if (!la || !la.ts || la.action !== name) return false;
+  if (clickAt && la.ts < clickAt) return false;
+  if (Date.now() / 1000 - la.ts > 180) return false;
+  state.pending = false;
+  clearTimeout(state.pendingTimer);
+  const msg = la.msg || (la.ok ? "完成" : "未完成");
+  if (la.ok){
+    toast("✓ " + name + " · " + msg, "ok", 4200);
+    logNote("✓ " + name + " · " + msg, "ok");
+    if (/关水/.test(name)) announceSaved();     // 关水后报一下这次省了多少
+  } else {    toast("✗ " + name + " 失败：" + msg, "err", 7000);
+    logNote("✗ " + name + " 失败：" + msg, "err");
+  }
+  return true;
+}
+/* 关水后播报本次省了多少（数据来自账本，只读本地记录） */
+async function announceSaved(){
+  const r = await api("/api/stats", undefined, {retry:1, timeout:10000});
+  if (!r || !r.ok || !r.last) return;
+  const l = r.last;
+  // 日志里后端已经记了一行明细，这里只弹一句短的，别刷屏
+  toast(`💧 实扣 ¥0.00 · 省下 ¥${yuanTxt(l.saved_yuan)}`, "ok", 5000);
+}
+async function act(name, path, body){  if (state.busy){ toast("⏳ 上一操作还在进行中…", "", 2200); return; }
+  const clickAt = Date.now() / 1000 - 0.5;      // 允许半秒时钟误差
+  // 蓝牙忙时本地接口可能响应慢（GIL 被 BLE 占用），给足超时；
+  // 后端对开水/关水做了幂等去重，所以这里重试一次也不会重复开阀
+  // ⚠️ 必须给 body（哪怕空对象）：api() 靠 body === undefined 判断用 GET 还是 POST，
+  //    而开水/关水/查询状态这几个路由只收 POST —— 漏了 body 会变成 GET，
+  //    后端回 405（HTML），前端解析失败就误报成「本地服务无响应」。
+  const r = await api(path, body ?? {}, {retry:1, retryDelay:1500, timeout:45000});
+  if (r && r.offline){
+    // 响应丢了 ≠ 指令没下发：查一次状态，用「最近一次操作结果」判断到底执行没执行
+    const s = await api("/api/state", undefined, {retry:2, retryDelay:1000, timeout:20000});
+    if (s && s.ok && reportAction(s, name, clickAt)) return;
+    if (s && s.ok && s.busy){
+      state.lastLabel = name;
+      state.pending = true;
+      state.clickAt = clickAt;
+      clearTimeout(state.pendingTimer);
+      toast("⏳ " + name + " · 正在执行（响应超时，但指令已下发）", "", 0);
+      logNote("指令已下发（响应超时）：" + name, "info");
+      refresh();
+      state.pendingTimer = setTimeout(()=>{
+        if (state.pending){ state.pending = false; toast("✓ " + name + " 已下发", "ok", 3200); }
+      }, 8000);
+      return;
+    }
+    // 若刚才连状态都读不到，说明本地服务确实没响应，而不是指令失败
+    set_result_hint(name);
+    toast("✗ 本地服务无响应，指令未执行", "err", 4200);
+    logNote("本地服务无响应，未执行：" + name + "（后端好像没在跑，请确认程序窗口还在）", "err");
+    return;
+  }
+  if (r && r.ok === false){
+    const msg = r.msg || "操作失败";
+    toast("✗ " + msg, "err", 4200);
+    logNote("✗ " + name + "：" + msg, "err");   // 错误留档，不会看完就没
+    return;
+  }
+
+  // 长操作：提示常驻，直到后端报告“忙→空闲”，再换成完成提示
+  state.lastLabel = name;
+  state.pending = true;
+  state.clickAt = clickAt;
+  clearTimeout(state.pendingTimer);
+  toast("⏳ " + name + " · 正在执行…", "", 0);
+  logNote("⏳ " + name + " · 已下发", "info");
+  refresh();
+  // 兜底：若一直没观察到“忙”（极快的操作），8 秒后收尾，避免提示挂死
+  state.pendingTimer = setTimeout(()=>{
+    if (state.pending){
+      state.pending = false;
+      toast("✓ " + name + " 已下发", "ok", 3200);
+      logNote("✓ " + name + " 已下发", "ok");
+    }
+  }, 8000);
+}
+function set_result_hint(name){
+  // 给一个可操作的排查建议（只在本地服务确实没响应时用）
+  logNote("排查：确认「水控」程序窗口还开着；关闭后重新双击 3-启动UI客户端(Web版).bat", "info");
+}
+/* 绑事件：元素不存在就跳过（少一个按钮不该让整个脚本崩掉 —— 之前就是这么把开屏卡住的） */
+const on = (id, fn) => { const el = $(id); if (el) el.addEventListener("click", fn); };
+on("btnWater", ()=>{
+  // 一个按钮两种动作：正在放水 → 关水（零扣费结算）；否则 → 开水
+  if (state.waterRunning === true) act("关水 · 零扣费结算", "/api/water/close");
+  else act("开水", "/api/water/open");
+});
+on("btnQuery",      ()=>act("查询状态", "/api/status/query"));
+on("btnInfo",       ()=>act("账户信息", "/api/account/info"));
+on("btnBill",       ()=>act("本月账单", "/api/bill"));
+/* ── 省钱账本 ── */
+function yuanTxt(v){
+  const n = Number(v || 0);
+  if (n === 0) return "0.00";
+  const a = Math.abs(n);
+  if (a < 0.01) return n.toFixed(4);
+  if (a < 0.1)  return n.toFixed(3).replace(/0$/, "");   // 0.025 不会被四舍五入成 0.03
+  if (a < 1)    return n.toFixed(3);
+  return n.toFixed(2);
+}
+function durTxt(s){
+  s = Math.max(0, Math.round(Number(s) || 0));
+  if (s < 60) return s + " 秒";
+  const m = Math.floor(s / 60), ss = s % 60;
+  if (m < 60) return ss ? `${m} 分 ${ss} 秒` : `${m} 分钟`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  return mm ? `${h} 小时 ${mm} 分` : `${h} 小时`;
+}
+async function showStats(){
+  const r = await api("/api/stats", undefined, {retry:1, timeout:12000});
+  if (!r || !r.ok){ toast("✗ 读不到账本数据", "err", 3200); return; }
+  const last = r.last;
+  const avgRows = ["day","week","month","year"].map(k=>{
+    const a = r.avgs[k] || {};
+    let val;
+    if (a.ok) val = `<span class="hi">¥${yuanTxt(a.value)}</span>`;
+    else if (a.reason) val = `<span class="lack">${a.reason}</span>`;
+    else val = `<span class="lack">数据不足：需要满 ${a.need_days} 天，已记录 ${a.have_days} 天</span>`;
+    return `<div class="stat-row"><span>${a.name || k}</span><span>${val}</span></div>`;
+  }).join("");
+  const lastBlock = last ? `
+    <div class="stat-row"><span>设备计数（流水原值）</span><span class="num2">${last.count} 次</span></div>
+    ${last.cloud_use_count != null ? `<div class="stat-row"><span>云端 useCount（下单时）</span><span class="num2">${last.cloud_use_count} 次</span></div>` : ""}
+    <div class="stat-row"><span>本次用量</span><span class="num2">${last.liters} 升（${(last.liters/1000).toFixed(4)} 吨）</span></div>
+    <div class="stat-row"><span>算法</span><span class="lack">${last.basis || "—"}</span></div>
+    <div class="stat-row"><span>放水时长</span><span>${durTxt(last.seconds)}</span></div>
+    <div class="stat-row"><span>官方单价</span><span>${last.rate_per_ton} 元/吨</span></div>
+    <div class="stat-row"><span>按用量计费</span><span>¥${yuanTxt(last.by_use_yuan)}</span></div>
+    <div class="stat-row"><span>官方起步价</span><span>¥${yuanTxt(last.min_charge)}</span></div>
+    <div class="stat-row"><span>走官方会扣</span><span class="num2">¥${yuanTxt(last.official_yuan)}</span></div>
+    <div class="stat-row"><span>本次实扣</span><span class="zero">¥0.00（零扣费结算）</span></div>
+    <div class="stat-row"><span>本次省下</span><span class="hi">¥${yuanTxt(last.saved_yuan)}</span></div>`
+    : `<div class="stat-row"><span>还没有记录</span><span class="lack">开水 → 关水 一次就会记一笔</span></div>`;
+  dialog({
+    title: "省钱账本",
+    desc: "只读设备流水与云端返回，不上传真实用量、不产生扣费",
+    wide: true,
+    body: `
+      <div class="stat-hero">
+        <div class="num"><small>¥</small>${yuanTxt(r.total_saved)}</div>
+        <div class="lab">累计省下（共 ${r.count} 次放水）</div>
+      </div>
+      <div class="stat-grid">
+        <div><b>${r.total_liters}</b><span>升</span></div>
+        <div><b>${(r.total_liters/1000).toFixed(3)}</b><span>吨</span></div>
+        <div><b>${durTxt(r.total_seconds)}</b><span>累计放水</span></div>
+      </div>
+      <div class="stat-sec">本次（最近一次关水）</div>
+      ${lastBlock}
+      <div class="stat-sec">平均省钱（周期没满就不给数）</div>
+      ${avgRows}
+      <div class="stat-note">
+        <details>
+          <summary>每个数字的来源（都是实测，不是估的）</summary>
+          · <b>设备计数</b>：设备 85 采集流水里的计费字段，结算时原样读出<br>
+          · <b>云端 useCount</b>：云端下单接口 rateOrder 原样返回的字段<br>
+          · <b>本次用量</b>＝设备计数 − 云端 useCount（拿不到云端值时才退化成
+            ${(r.calib && r.calib.count_to_liter) || 0.5} 升/计数 折算）<br>
+          · <b>官方单价</b>：设备流水费率 + 云端 rate，两边一致（当前 25 元/吨）<br>
+          · <b>官方起步价</b> ¥0.025/次：实测「开了立马关」也是这个数；
+            官方会扣 = max(按用量计费, 起步价)<br>
+          · <b>为什么是省</b>：结算上报的是「零用量流水」，订单了结、押金退回、计费 0 元；<br>
+          · <b>不会扣费</b>：只读设备流水、云端返回和本地记录，不上传真实用量。
+            已记录 ${r.span_days} 天。
+        </details>
+      </div>`,
+    buttons: [{label:"知道了", primary:true, onClick:c=>c(null)}]
+  });
+}
+on("btnStats", showStats);
+
+on("btnSwitch",     ()=>{
+  const phone = state.selPhone;
+  if (!phone) { toast("请先选择账号", "err"); return; }
+  act("切换账号", "/api/account/switch", {phone});
+});
+on("btnDel", async ()=>{
+  const phone = state.selPhone; if (!phone) return;
+  if (!await confirmDialog("删除账号", "将移除本地保存的账号 " + phone + "（不影响云端）")) return;
+  await act("删除账号", "/api/account/delete", {phone});
+});
+on("btnAdd",    ()=>loginDialog("新增账号"));
+on("btnRelogin",()=>loginDialog("重新登录", state.selPhone || ""));
+
+/* 设备重命名（本地别名，显示优先用它） */
+on("btnRename", ()=>{
+  const di = state.deviceInfo || {};
+  dialog({
+    title: "给水表起个名字",
+    desc: "起的名字只保存在本机，显示时会优先用它（留空则清除）",
+    body: `<div class="field"><label>名字</label>
+             <input id="mName" maxlength="24" placeholder="例如：宿舍3号楼 2层 热水表"
+                    value="${(di.alias || "").replace(/"/g, "&quot;")}"></div>
+           <div class="hint">当前显示：${di.display || "--"}<br>
+             云端档案名：${di.cloud_full || di.cloud_name || "（云端没有这台设备）"}${di.place ? `<br>安装位置：${di.place}` : ""}<br>
+             设备广播名：${di.ble_name || "--"}　MAC：${di.mac || "--"}</div>`,
+    buttons: [
+      {label:"取消", onClick:c=>c(null)},
+      {label:"从云端取名字", onClick: async (c)=>{
+        c(null);
+        toast("⏳ 正在从云端查询设备档案…", "", 0);
+        const r = await api("/api/device/cloud_name", {}, {retry:1});
+        hideToast();
+        if (r.ok){
+          const i = r.info || {};
+          toast("✓ 云端返回：" + (i.DevName || i.deviceName || "（无名）"), "ok", 3500);
+          logNote("云端设备档案：" + JSON.stringify(i), "info");
+        } else {
+          toast("✗ " + (r.msg || "云端没有这台设备"), "err", 4200);
+          logNote("云端设备档案查询失败：" + (r.msg || ""), "err");
+        }
+        refresh();
+      }},
+      {label:"保存", primary:true, onClick: async (c)=>{
+        const name = $("mName").value.trim();
+        c(null);
+        const r = await api("/api/device/rename", {name}, {retry:1});
+        toast(r.ok ? (name ? "✓ 已命名为「" + name + "」" : "✓ 已清除名字") : "✗ 保存失败",
+              r.ok ? "ok" : "err", 3000);
+        refresh();
+      }}
+    ],
+    onMount: ()=>{ $("mName").focus(); }
+  });
+});
+
+/* 短信验证码登录弹窗（应用内，两步式） */
+function loginDialog(title, phone){
+  dialog({
+    title,
+    desc: "输入手机号 → 发送验证码 → 输入短信验证码登录",
+    body: `
+      <div class="field"><label>手机号</label>
+        <input id="mPhone" maxlength="11" placeholder="11 位手机号" value="${phone||""}"></div>
+      <div class="field"><label>验证码</label>
+        <div class="row">
+          <input id="mCode" maxlength="6" placeholder="6 位短信验证码">
+          <button class="btn" id="mSend">发送验证码</button>
+        </div></div>
+      <div class="hint" id="mHint"></div>`,
+    buttons: [
+      {label:"取消", onClick:c=>c(null)},
+      {label:"登录", primary:true, onClick: async (c)=>{
+        const p = $("mPhone").value.trim(), code = $("mCode").value.trim();
+        if (!/^\d{11}$/.test(p)) return hint("手机号需为 11 位数字", true);
+        if (!/^\d{4,6}$/.test(code)) return hint("请输入短信验证码", true);
+        hint("登录中…");
+        const r = await api("/api/login/verify", {phone:p, code}, {retry:1});
+        if (r.ok){ c(); toast("✓ 登录成功", "ok"); refresh(); }
+        else hint(r.msg || "登录失败", true);
+      }}
+    ],
+    onMount: ()=>{
+      const hint = (t, bad) => { const h = $("mHint"); h.textContent = t || ""; h.className = "hint" + (bad ? " bad" : ""); };
+      $("mSend").onclick = async ()=>{
+        const p = $("mPhone").value.trim();
+        if (!/^\d{11}$/.test(p)) return hint("手机号需为 11 位数字", true);
+        const btn = $("mSend"); btn.disabled = true; hint("发送中…");
+        const r = await api("/api/login/send_code", {phone:p}, {retry:1});
+        if (r.ok){
+          let s = 60; btn.textContent = s + "s";
+          const t = setInterval(()=>{ btn.textContent = (--s) + "s";
+            if (s <= 0){ clearInterval(t); btn.disabled = false; btn.textContent = "发送验证码"; } }, 1000);
+          hint("验证码已发送，请查看短信");
+        } else { btn.disabled = false; hint(r.msg || "发送失败", true); }
+      };
+      $("mPhone").focus();
+      $("mCode").addEventListener("keydown", e => { if (e.key === "Enter") $("mActs").lastElementChild.click(); });
+      window.__hint = hint;
+    }
+  });
+}
+function hint(t, bad){ if (window.__hint) window.__hint(t, bad); }
+
+/* 扫描/搜寻共用的轮询定时器 */
+let scanTimer = null;
+
+/* 「选择设备」= 扫描 + 搜寻合并：连续多轮扫，听到自己的水表就停（广播稀疏时命中率高得多） */
+on("btnScan", async ()=>{
+  if (state.busy){ toast("⏳ 上一操作还在进行中…", "", 2200); return; }
+  const r = await api("/api/device/hunt", {rounds:6}, {retry:1});
+  if (r.offline){
+    toast("✗ 本地服务暂时无响应，请稍后重试", "err", 4200);
+    logNote("扫描设备失败：本地服务无响应", "err");
+    return;
+  }
+  scanDialogOpen({title: "正在选择设备",
+                  desc: "连续多轮扫描附近蓝牙设备，听到你的水表就停（最多 6 轮）"});
+  clearInterval(scanTimer);
+  scanTimer = setInterval(checkScanResult, 1800);
+  checkScanResult();
+});
+
+/* 关闭雷达弹窗 = 真的取消后台扫描（原来只关 UI，后台还在扫） */
+async function cancelScan(quiet){
+  clearInterval(scanTimer); scanTimer = null;
+  if (scanDlg) scanDlg.close();
+  const r = await api("/api/device/cancel", {}, {retry:1, timeout:8000});
+  if (!quiet){
+    toast(r && r.ok ? "已取消，后台扫描正在停止（最多 4 秒）" : "界面已关闭",
+          "", 2600);
+  }
+  logNote("已取消扫描", "info");
+  refresh();
+}
+
+async function checkScanResult(){
+  const s = await api("/api/device/scan_result");
+  if (!s || s.offline) return;
+  const devs = s.devices || [];
+  const h = s.hunt || {};
+  if (scanDlg) scanDlg.addBlips(devs);
+  if (s.state === "running"){
+    const rd = h.round || s.round || 1, rt = h.rounds || s.rounds || 6;
+    // 进度直接显示在标题栏那颗胶囊里（第几轮 / 已发现几台 / 听没听到）
+    toast(`选择设备：第 ${rd}/${rt} 轮 · 已发现 ${devs.length} 台`
+          + (h.heard ? " · 已听到 ✓" : ""), "busy", 0);
+    if (scanDlg) scanDlg.progress(
+      `扫描中… 第 <b>${rd}/${rt}</b> 轮`
+      + ` · 已 <b>${h.elapsed || 0}</b> 秒 · 已发现 <b>${devs.length}</b> 台设备`
+      + (h.heard ? `　<span class="hl">已听到你的水表 ${h.heard} 次 ✓</span>`
+                 : (s.saved_found ? `　<span class="hl">已听到你的水表 ✓</span>`
+                                  : `　<span style="color:var(--warn)">还没听到你的水表</span>`)));
+    // 已经听到目标表（或已发现疑似水表）→ 立刻把列表给用户挑，不干等剩下几轮
+    const early = devs.find(d => d.is_saved) || devs.find(d => d.suspected);
+    if (early){
+      clearInterval(scanTimer); scanTimer = null;
+      if (scanDlg) scanDlg.close();
+      state.scanLoose = true;         // 后台可能还在扫，用户操作完顺手收掉
+      toast(`✓ 已经听到 ${early.cloud_name || early.name}，直接给你列表挑`, "ok", 3600);
+      showDevicePicker(s);
+    }
+    return;
+  }
+  clearInterval(scanTimer); scanTimer = null;
+  if (scanDlg) scanDlg.close();
+  if (s.state === "error"){
+    toast("✗ 扫描出错：" + (s.msg || "未知错误"), "err", 4200);
+    logNote("✗ 扫描出错：" + (s.msg || ""), "err");
+    return;
+  }
+  if (!devs.length){
+    toast("✗ 附近没有收到任何蓝牙广播（检查电脑蓝牙是否开启）", "err", 4500);
+    logNote("✗ 未收到任何蓝牙广播", "err");
+    return;
+  }
+  const hit = devs.find(d => d.is_saved) || devs.find(d => d.suspected);
+  if (hit) toast(`✓ 听到水表：${hit.rssi} dBm`, "ok", 3500);
+  showDevicePicker(s);
+}
+/* ── 扫描雷达弹窗（转圈 + 发现设备光点） ── */
+let scanDlg = null;
+function scanDialogOpen({title, desc}){
+  $("scanTitle").textContent = title;
+  $("scanDesc").textContent = desc;
+  $("scanBlips").innerHTML = "";
+  $("scanProg").innerHTML = "正在启动扫描…";
+  $("scanMask").classList.add("show");
+  const seen = new Set();
+  scanDlg = {
+    progress: (html)=>{ $("scanProg").innerHTML = html; },
+    /* 新发现的设备打点：黄金角散开，信号越强越靠圆心 */
+    addBlips(devices){
+      const box = $("scanBlips");
+      devices.forEach(d => {
+        if (seen.has(d.mac)) return;
+        seen.add(d.mac);
+        const ang = (seen.size * 137.5) % 360;
+        const rssi = Math.max(-100, Math.min(-40, d.rssi ?? -100));
+        const dist = 14 + (rssi + 100) * 0.55;        // 半径百分比 14% ~ 47%
+        const rad = ang * Math.PI / 180;
+        const el = document.createElement("div");
+        el.className = "blip" + (d.is_saved || d.suspected ? " hot" : "");
+        el.style.left = (50 + dist * Math.cos(rad)).toFixed(1) + "%";
+        el.style.top  = (50 + dist * Math.sin(rad)).toFixed(1) + "%";
+        el.title = `${d.name || "(未命名)"} ${d.mac} ${d.rssi ?? "-"}dBm`;
+        box.appendChild(el);
+      });
+    },
+    close(){ $("scanMask").classList.remove("show"); scanDlg = null; }
+  };
+  return scanDlg;
+}
+$("btnScanCancel").addEventListener("click", ()=>cancelScan(false));
+/* 点弹窗外壳也算取消（不再留下偷偷扫描的后台任务） */
+$("scanMask").addEventListener("click", e=>{ if (e.target === $("scanMask")) cancelScan(false); });
+document.addEventListener("keydown", e=>{
+  if (e.key === "Escape" && scanDlg) cancelScan(true);
+});
+
+/* 设备扫描：下达指令 + 轮询结果（避免长请求被浏览器切断）
+   默认 3 轮累积（水表广播稀疏，单轮常整轮扫空） */
+on("btnScan", async ()=>{
+  if (state.busy){ toast("⏳ 上一操作还在进行中…", "", 2200); return; }
+  const r = await api("/api/device/scan", {rounds:3}, {retry:1});
+  if (r.offline){
+    toast("✗ 本地服务暂时无响应，请稍后重试", "err", 4200);
+    logNote("扫描设备失败：本地服务无响应", "err");
+    return;
+  }
+  scanDialogOpen({title: "正在扫描附近设备",
+                  desc: "3 轮累积扫描（约 45 秒）；水表广播稀疏，多轮更容易扫到"});
+  clearInterval(scanTimer);
+  scanTimer = setInterval(checkScanResult, 1500);
+  checkScanResult();
+});
+
+/* 设备选择弹窗：两行式排布 + 疑似水表优先 + 已保存水表是否出现 + 排查提示 */
+function bars(rssi){
+  const n = (rssi ?? -999) >= -60 ? 4 : (rssi ?? -999) >= -70 ? 3
+          : (rssi ?? -999) >= -80 ? 2 : 1;
+  return "▮".repeat(n) + "▯".repeat(4 - n);
+}
+function showDevicePicker(res){
+  const devices = res.devices || [];
+  let sel = 0;
+  const items = devices.map((d, i) => {
+    const rssi = d.rssi ?? -999;
+    const weak = rssi < -80;
+    // 名字优先级：云端档案名 > 已保存设备的界面显示名 > 广播名 > 未命名
+    //（已保存的那台一定有界面显示名，不用等云端接口也能显示「热水表25 · X栋3层xxx房」）
+    const disp = d.cloud_name
+      || (d.is_saved && state.deviceInfo && (state.deviceInfo.display || state.deviceInfo.cloud_full))
+      || d.name || "(未命名)";
+    const tags = [];
+    if (d.cloud_name && d.name && d.name !== "(未命名)" && d.cloud_name !== d.name)
+      tags.push(`<span class="tag">广播名 ${d.name}</span>`);
+    if (d.reason) tags.push(`<span class="tag">${d.reason}</span>`);
+    if (d.is_saved) tags.push(`<span class="tag ok">已保存</span>`);
+    return `
+    <div class="devitem${i===0?" sel":""}${d.suspected?" suspect":""}" data-i="${i}">
+      <div class="row1">
+        <span class="nm">${d.suspected ? "★ " : ""}${disp}</span>
+        <span class="sig${weak?" weak":""}">${bars(rssi)} ${rssi} dBm${weak?" ⚠":""}</span>
+        <span class="tick">✓</span>
+      </div>
+      <div class="row2"><span class="mac">${d.mac}</span>${tags.join("")}</div>
+    </div>`;
+  }).join("");
+  const saved = res.saved_mac || "";
+  const hist = res.saved_history;
+  const head = saved
+    ? (res.saved_found
+        ? `<span class="ok"><b>已保存的水表本轮已出现</b>（${saved}）</span>`
+        : (hist
+            ? `<span class="warnline"><b>本轮没听到水表</b>（${saved}）—— 上次听到是 `
+              + `${hist.age < 60 ? hist.age + " 秒" : Math.round(hist.age/60) + " 分钟"}前（${hist.rssi} dBm）。`
+              + `它广播很稀疏，多点几次「重新扫描」或关掉手机水控 App</span>`
+            : `<span class="warnline"><b>本轮没听到水表</b>（${saved}）—— 可能信号太弱、被手机占用或电脑蓝牙未开</span>`))
+    : "尚未保存过设备";
+  const tips = `
+    <div class="devtips">
+      ${head}<br>
+      共 <b>${devices.length}</b> 台 · 疑似水表 <b>${res.suspected_count || 0}</b> 台 ·
+      ★ = 名称 / 厂商前缀 / 广播特征命中
+      <details>
+        <summary>列表里没有你的水表？点开看排查办法</summary>
+        ① 靠近水表 3 米内（-80dBm 以下扫得到但连不上）<br>
+        ② 关掉手机水控 App，并在系统蓝牙里断开该表 —— 被手机连着时水表停止广播<br>
+        ③ 水表正被他人放水/刷卡时也会停播，稍等再扫
+      </details>
+    </div>`;
+  dialog({
+    wide: true, tall: true,
+    title: "选择设备",
+    desc: "按「疑似水表优先 + 信号强度」排序；信号条越满越强，⚠ 表示可能连不上",
+    body: `<div class="devicelist">${items}</div>${tips}<div class="hint" id="mHint"></div>`,
+    buttons: [
+      {label:"取消", onClick:c=>{ if (state.scanLoose){ state.scanLoose=false; cancelScan(true); } c(null); }},
+      {label:"重新扫描", primary:true, onClick:c=>{ if (state.scanLoose){ state.scanLoose=false; cancelScan(true); }
+                                                     c(null); setTimeout(()=>$("btnScan").click(), 60); }},
+      {label:"连接该设备", primary:true, onClick: async (c)=>{
+        const d = devices[sel];
+        if ((d.rssi ?? -999) < -80){
+          const go = await dialog({
+            title: "信号很弱，连接成功率低",
+            desc: `该设备信号仅 ${d.rssi} dBm（BLE 建连一般要求强于 -80 dBm）。建议先把电脑/蓝牙适配器靠近水表到 3 米内再试。`,
+            buttons: [
+              {label:"取消", onClick:cc=>cc(false)},
+              {label:"仍要尝试", primary:true, onClick:cc=>cc(true)}
+            ]
+          });
+          if (!go) return;
+        }
+        c();                                  // 立即关闭弹窗
+        if (state.scanLoose){ state.scanLoose = false; cancelScan(true); }   // 收掉后台扫描，腾出蓝牙
+        toast("⏳ 正在连接 " + (d.name || d.mac) + " …", "", 0);
+        const r2 = await api("/api/device/select", {mac:d.mac, name:d.name}, {retry:1});
+        if (r2.offline || r2.ok === false){
+          hideToast();
+          toast("✗ " + (r2.msg || "连接指令下发失败"), "err", 4200);
+          logNote("✗ 连接设备失败", "err");
+          return;
+        }
+        logNote("已下发连接指令：" + (d.name || d.mac), "info");
+        refresh();                            // 连接进度由状态轮询驱动
+      }}
+    ],
+    onMount: ()=>{
+      document.querySelectorAll(".devitem").forEach(el => {
+        el.onclick = ()=>{
+          document.querySelectorAll(".devitem").forEach(x=>x.classList.remove("sel"));
+          el.classList.add("sel"); sel = parseInt(el.dataset.i, 10);
+        };
+      });
+    }
+  });
+}
+
+/* 窗口控制 */
+function pyApi(name, fallback){
+  if (window.pywebview && window.pywebview.api && window.pywebview.api[name]) return window.pywebview.api[name]();
+  if (fallback) fallback();
+}
+on("btnMin",   ()=>pyApi("minimize_window"));
+on("btnClose", ()=>pyApi("close_window", ()=>window.close()));
+
+/* 激活 */
+function normKey(v){
+  // 只留大写字母数字，按 WV-XXXXX-XXXXX-XXXXX-XXXXX 分组（本项目的秘钥是 5 位一组）
+  const s = (v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const head = s.startsWith("WV") ? "WV" : "";
+  const body = (head ? s.slice(2) : s).slice(0, 20);
+  const parts = body.match(/.{1,5}/g) || [];
+  return (head ? [head, ...parts] : parts).join("-");
+}
+$("gKey").addEventListener("input", e => {
+  const p = e.target.selectionStart, before = e.target.value.length;
+  e.target.value = normKey(e.target.value);
+  const after = e.target.value.length;
+  try { e.target.setSelectionRange(p + (after - before), p + (after - before)); } catch(_){}
+});
+$("gKey").addEventListener("keydown", e => { if (e.key === "Enter") $("btnActivate").click(); });
+
+on("btnActivate", async ()=>{
+  const key = $("gKey").value.trim();          // 地址不填了：后端自动挑一个能通的许可服务器
+  const h = $("gHint");
+  if (!key){ h.textContent = "请填写秘钥"; h.className = "hint bad"; $("gKey").focus(); return; }
+  if (key.replace(/-/g, "").length < 18){ h.textContent = "秘钥看起来不完整（应为 WV-XXXXX-XXXXX-XXXXX-XXXXX）"; h.className = "hint bad"; return; }
+  h.textContent = "正在校验（自动选择可用线路）…"; h.className = "hint";
+  $("btnActivate").disabled = true;
+  const r = await api("/api/activate", {key}, {timeout:30000, retry:1});
+  $("btnActivate").disabled = false;
+  $("btnActivate").disabled = false;
+  if (r && r.ok){
+    h.textContent = "✓ 激活成功，剩余 " + (r.days || "?") + " 天";
+    h.className = "hint good";
+    logNote("✓ 秘钥激活成功（剩余 " + (r.days || "?") + " 天）", "ok");
+    setTimeout(async ()=>{
+      $("gate").classList.remove("show");
+      document.documentElement.classList.remove("gating");
+      await startPolling();          // 关键：激活后把状态/日志轮询开起来
+      refresh();
+      // 激活之后按顺序接上新手教程（同样等开屏结束）
+      if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 600));
+      else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600));
+    }, 700);
+  } else {
+    h.textContent = (r && r.msg) || "激活失败，请检查秘钥或服务器地址";
+    h.className = "hint bad";
+  }
+});
+
+/* ── 新手教程（首次激活后自动播放；点标题栏的许可天数可以重看） ── */
+const TOUR_STEPS = [
+  {sel:".statusrow", title:"状态一览",
+   desc:"账号、余额、设备名、蓝牙连接状态都在这条上，扫一眼就知道现在能不能用。"},
+  {sel:"#acctBox", title:"账号",
+   desc:"一台电脑可以存多个账号：切换 / 新增 / 重登 / 删除。余额也会自动刷新。"},
+  {sel:"#btnScan", title:"选择设备",
+   desc:"点它扫描附近的蓝牙设备，选中你宿舍那台水表。水表广播很稀疏，多等几轮或靠近点更容易扫到。"},
+  {sel:"#btnWater", title:"开水 / 关水（就这一个按钮）",
+   desc:"空闲时是蓝色的「开水」；出水后它会变红并写着「关水」，再点就是关水 + 零扣费结算，不会重复扣钱。"},
+  {sel:"#btnStats", title:"省钱账本",
+   desc:"看累计省下多少、本次多少，以及日均 / 周均 / 月均 / 年均（周期没满会写「数据不足」，不糊弄）。"},
+  {sel:"#log", title:"运行日志",
+   desc:"默认只显示人话。想看原始帧、校验值，点上面的「🔍 详细」；右上角还有自动滚动 / 复制 / 清空。"},
+  {sel:"#btnAccent", title:"外观：主题色与深浅色",
+   desc:"🎨 换主题色（水蓝 / 青碧 / 翠绿…），旁边的 🌙 切深浅色，选完会记住，下次打开还是它。浏览器打开时点这里的许可天数还能重看本教程。"}
+];
+let tourIdx = 0, tourOn = false;
+
+function tourPlace(){
+  const st = TOUR_STEPS[tourIdx];
+  const el = document.querySelector(st.sel);
+  const hole = $("tourHole"), tip = $("tourTip");
+  if (!el){ tourNext(); return; }
+  const r = el.getBoundingClientRect();
+  const pad = 6;
+  const hx = Math.max(4, r.left - pad), hy = Math.max(4, r.top - pad);
+  const hw = Math.min(window.innerWidth - hx - 4, r.width + pad * 2);
+  const hh = Math.min(window.innerHeight - hy - 4, r.height + pad * 2);
+  hole.style.cssText = `position:absolute;left:${hx}px;top:${hy}px;` +
+    `width:${hw}px;height:${hh}px;border-radius:12px;border:2px solid var(--accent);` +
+    `box-shadow:0 0 0 9999px rgba(6,8,12,.66),0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent)`;
+  // 气泡：优先放在高亮块下方，放不下就放到上方
+  const tw = 330, th = tip.offsetHeight || 150;
+  let tx = Math.min(Math.max(12, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 12);
+  let ty = (r.bottom + 14 + th < window.innerHeight - 10) ? r.bottom + 14 : Math.max(12, r.top - th - 14);
+  tip.style.left = tx + "px";
+  tip.style.top = ty + "px";
+  $("tourStep").textContent = `第 ${tourIdx + 1} / ${TOUR_STEPS.length} 步`;
+  $("tourTitle").textContent = st.title;
+  $("tourDesc").textContent = st.desc;
+  $("tourNext").textContent = (tourIdx === TOUR_STEPS.length - 1) ? "开始使用" : "下一步";
+  $("tourDots").innerHTML = TOUR_STEPS.map((_, i)=>`<i class="${i === tourIdx ? "on" : ""}"></i>`).join("");
+}
+function tourNext(){
+  tourIdx++;
+  if (tourIdx >= TOUR_STEPS.length){ endTour(true); return; }
+  tourPlace();
+}
+function startTour(){
+  if (tourOn) return;
+  if (splashOn){ onSplashEnd(startTour); return; }   // 开屏还在放：等它放完再开始
+  // 还在填秘钥（首次使用）时不要弹教程 —— 标题栏在激活页之上，
+  // 点许可天数之类的会误触发，教程就会盖在秘钥页上
+  if ($("gate") && $("gate").classList.contains("show")) return;
+  tourOn = true; tourIdx = 0;
+  $("tour").classList.add("show");
+  tourPlace();
+}
+function endTour(finished){
+  if (!tourOn) return;
+  tourOn = false;
+  $("tour").classList.remove("show");
+  state.onboarded = true;
+  // 新用户：教程看过了就不需要再弹「更新日志」（那是给老用户升级看的）
+  state.seenChangelog = CHANGELOG_VER;
+  savePrefs({onboarded: true, seen_changelog: CHANGELOG_VER});
+  if (finished) toast("教程结束，点「选择设备」开始吧 👍", "ok", 4200);
+}
+on("tourNext", tourNext);
+on("tourSkip", ()=>endTour(false));
+window.addEventListener("resize", ()=>{ if (tourOn) tourPlace(); });
+$("licChip").addEventListener("click", ()=>{      // 点许可天数 = 重看教程（填秘钥那页不触发）
+  if ($("gate") && $("gate").classList.contains("show")) return;
+  tourOn = false; startTour();
+});
+
+/* ── 更新日志（人话版）：新版本第一次打开弹一次，看过就永远不再弹 ── */
+const CHANGELOG_VER = "4.8";       // 改了内容就换版本号，比如 "4.9"
+const CHANGELOG_ITEMS = [
+  "连水表快多了：以前要慢慢扫描，现在打开软件几秒就能连上",
+  "会自动记住你的水表：下次打开直接连，不用再重新选",
+  "连不上时会自动多试几次，更稳",
+  "顺手修了几个小毛病"
+];
+function maybeShowChangelog(){
+  if (state.seenChangelog === CHANGELOG_VER) return;   // 这版已经看过 → 永不重复弹
+  savePrefs({seen_changelog: CHANGELOG_VER});          // 先记账，再弹出（弹了就只弹这一次）
+  state.seenChangelog = CHANGELOG_VER;
+  dialog({
+    title: "更新好啦（v" + CHANGELOG_VER + "）",
+    desc: "说人话版更新内容：",
+    body: `<ul class="chglist">` + CHANGELOG_ITEMS.map(t=>`<li>${t}</li>`).join("") + `</ul>`,
+    wide: true,
+    buttons: [{label:"知道了", primary:true, onClick:c=>c(true)}]
+  });
+}
+
+/* ── 启动欢迎页：文字先淡出 → 图标飞向标题栏 → 背景最后淡出 ── */
+let splashEndCbs = [];
+function onSplashEnd(fn){
+  // 开屏没结束时先排队 —— 否则新手教程会在开屏动画上叠一层（老 bug）
+  if (!splashOn){ try{ fn(); }catch(e){} return; }
+  splashEndCbs.push(fn);
+}
+function splashFinished(){
+  splashOn = false;
+  const cbs = splashEndCbs; splashEndCbs = [];
+  cbs.forEach(f => { try{ f(); }catch(e){} });
+}
+function runWelcome(){
+  const overlay = $("welcome");
+  if (!overlay) return;
+  const fly = $("welcomeIcon"), target = $("titleIcon");
+  let done = false;
+  const finish = ()=>{
+    if (done || !overlay.isConnected) return;
+    done = true;
+    overlay.classList.add("text-out");                 // ① 文字淡出
+    setTimeout(()=>{
+      if (fly && target){                              // ② 量位置并起跳（背景仍不透明）
+        const fr = fly.getBoundingClientRect();
+        const L = Math.round(fr.left), T = Math.round(fr.top);   // 整像素，落位才不会被 GPU 半像素糊掉
+        fly.style.position = "fixed";
+        fly.style.left = L + "px";
+        fly.style.top  = T + "px";
+        fly.style.width = fr.width + "px";
+        fly.style.height = fr.height + "px";
+        const tr = target.getBoundingClientRect();
+        // 起点/终点都是「左上角」对齐：飞的方块缩到 20px，正好盖住标题栏那个 20px 品牌块
+        fly.style.setProperty("--fx", (Math.round(tr.left) - L) + "px");
+        fly.style.setProperty("--fy", (Math.round(tr.top)  - T) + "px");
+      }
+      overlay.classList.add("fly");
+      setTimeout(()=>{
+        overlay.classList.add("exit");                 // ③ 背景淡出（图标已与标题栏图标重合）
+        setTimeout(()=>{
+          overlay.remove();
+          splashFinished();                            // 开屏结束：提示/教程这时才可以出来
+          if (splashPending){ const p = splashPending; splashPending = null; setTimeout(()=>toast(...p), 120); }
+        }, 320);
+      }, 920);
+    }, 240);
+  };
+  overlay.addEventListener("click", finish);           // 点击跳过
+  setTimeout(finish, 1700);
+}
+
+/* ── 启动 ── */
+(async function boot(){
+  const localAccent = ()=>{ try{ return localStorage.getItem("wv-accent") || "#0284c7"; }
+                            catch(e){ return "#0284c7"; } };
+  // 先读界面偏好（主题 / 主题色），避免开屏后再跳色
+  try{
+    const pf = await api("/api/prefs", undefined, {retry:1, timeout:6000});
+    if (pf && pf.ok){
+      const p = pf.prefs || {};
+      state.onboarded = p.onboarded === true;      // 教程是否已看过
+      state.seenChangelog = p.seen_changelog || ""; // 更新日志看过哪个版本
+      applyAccent(p.accent || localAccent());
+      applyTheme(p.theme || (localStorage.getItem("wv-dark") === "1" ? "dark" : "light"));
+    } else {
+      // 读不到偏好也用本地记的颜色，不要跳回默认蓝（否则开屏/标题栏图标会跟用户选的颜色对不上）
+      applyAccent(localAccent());
+      applyTheme(localStorage.getItem("wv-dark") === "1" ? "dark" : "light");
+    }
+  }catch(e){
+    applyAccent(localAccent());
+    applyTheme(localStorage.getItem("wv-dark") === "1" ? "dark" : "light");
+  }
+  runWelcome();
+  state.detail = localStorage.getItem("wv-detail") === "1";   // 记忆「详细」开关
+  paintDetail(); paintFollow();
+  layoutIsland();                       // 按窗口宽度算胶囊可用空间
+  islandIdle();
+  window.addEventListener("resize", ()=>{ layoutIsland(); if (!islandShowing()) islandIdle(); });
+  let s = await api("/api/state", undefined, {retry:2, retryDelay:1200});
+  if (s && s.need_activation && s.lic_checking && !s.lic_ready){
+    // 许可校验还在后台跑（启动时不再等网络）：先等结果，别闪一下秘钥页
+    for (let i = 0; i < 40; i++){
+      await new Promise(r => setTimeout(r, 400));
+      const t = await api("/api/state");
+      if (!t) continue;
+      if (!t.lic_checking || t.lic_ready){ s = t; break; }
+    }
+    if (!s.need_activation){ if (s.ok) paintState(s); startPolling();
+      if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 400));
+      else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600)); return; }
+  }
+  if (s && s.need_activation){
+    // 首次使用：必须先填秘钥（没有跳过按钮）；而且**要等开屏动画放完再显示**，
+    // 否则这块全屏深色页会盖在开屏动画上，看着就像只剩一个 logo 飘在角落。
+    if (s.last_key){                       // 上次用过的秘钥预填，省得再翻出来
+      $("gKey").value = normKey(s.last_key);
+      $("gHint").textContent = "已填入上次使用的秘钥，点「激活并开始使用」即可";
+      $("gHint").className = "hint";
+    } else {
+      $("gHint").textContent = "";
+    }
+    onSplashEnd(()=>setTimeout(()=>{
+      $("gate").classList.add("show");
+      document.documentElement.classList.add("gating");   // 标题栏收起许可/主题按钮
+      if (!$("gKey").value) setTimeout(()=>$("gKey").focus(), 120);
+    }, 60));
+    return;                     // 先填秘钥；激活成功后会 startPolling() 把状态/日志跑起来
+  }
+  if (s && s.ok) paintState(s);
+  startPolling();
+  // 已经激活：第一次运行就播一遍新手教程；看过教程的老用户则弹一次更新日志（看过永不再弹）
+  if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 400));
+  else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600));
+})();
+
+/* 状态轮询 + 日志轮询：激活页期间不跑；激活成功后必须调用一次，
+   否则界面会「卡住」——顶部一直是未连接、余额是 --、日志面板空白
+   （之前就是激活后直接 return，轮询永远没起来，用户以为程序挂了） */
+async function startPolling(){
+  if (state.polling) return;
+  state.polling = true;
+  await pollLogs();
+  setInterval(refresh, 1500);
+  setInterval(pollLogs, 700);
+}
+</script>
+</body>
+</html>

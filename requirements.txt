@@ -1,0 +1,10 @@
+bleak
+requests
+pycryptodome
+flask
+pywebview
+waitress
+pyperclip
+sv-ttk
+darkdetect
+pythonnet; sys_platform == "win32"

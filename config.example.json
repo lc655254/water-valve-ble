@@ -1,0 +1,17 @@
+{
+  "version": 4,
+  "active_phone": "",
+  "accounts": {},
+  "mac": "",
+  "name": "KLCXKJ-Water",
+  "mode": "ble",
+  "rate": 0.025,
+  "last_open_mode": "",
+  "last_rn": "",
+  "last_rn_pre": "",
+  "last_cm": "",
+  "last_dev_id": null,
+  "max_open_minutes": 20,
+  "max_cost_yuan": 3.0,
+  "profiles": {}
+}
