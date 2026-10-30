@@ -56,13 +56,18 @@ def _res_dir():
 APP_DIR = wv._data_dir()      # 只读安装位置自动回退 %LOCALAPPDATA%\蓝牙水库
 WEB_DIR = os.path.join(_res_dir(), "web")
 LIC_FILE = os.path.join(APP_DIR, "license.json")
-# 可选的许可服务地址（本项目默认跳过许可校验，仅保留接口示例）
+# 许可服务器地址：界面上不显示、也不用手填 —— 内置几个候选，谁通用谁。
+#   ① 公网隧道（异地也能激活/续期）  ② 本机直连（隧道没开时兜底）
 LIC_ENDPOINTS = [
-    "http://127.0.0.1:26921",
+    # 顺序：先本机（连不上是毫秒级失败），再公网隧道 —— 远端用户只有隧道那条能通
+    "http://127.0.0.1:26921",                  # 本机（隧道转发目标端口）
+    "http://127.0.0.1:8900",                   # 本机（老端口，兼容）
+    "http://7fa4ee7e0404.ofalias.com:46700",   # 内网穿透：公网 → 本机 26921
+    "http://26.10.23.68:26921",                # Radmin VPN 里的服务器（隧道挂了也能用）
 ]
-DEFAULT_SERVER = LIC_ENDPOINTS[0]
+DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
-API_PORT = 18801
+API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -637,7 +642,7 @@ def device_display_info(force=False, allow_network=True):
         cloud.get("buildingName") or cloud.get("LDName") or "",
         cloud.get("floorName") or cloud.get("LCName") or "",
         cloud.get("roomName") or cloud.get("FJName") or "") if x)
-    # 云端长名太啰嗦（热水表25-学校-X栋-3层-xxx房），压成「类型 · 位置」
+    # 云端长名太啰嗦（热水表25-学校-X12公寓-3层-330房），压成「类型 · 位置」
     kind = cloud.get("smallTypeName") or cloud.get("bigTypeName") or ""
     cloud_short = " · ".join(x for x in (kind, place) if x) if place else cloud_full
     ble_name = wv.CFG.get("name") or ""
@@ -731,7 +736,7 @@ SIMPLE_HIDE = [
 
 
 def _friendly_archive_name(full):
-    """热水表25-示例学校-X栋-3层-xxx房 → 热水表25 · X栋3层xxx房"""
+    """热水表25-淮安信息职业技术学院-X12公寓-3层-330房 → 热水表25 · X12公寓3层330房"""
     parts = [p.strip() for p in str(full).split("-") if p.strip()]
     if len(parts) >= 4:
         return parts[0] + " · " + "".join(parts[-3:])
@@ -854,7 +859,7 @@ def _map_line(line):
                     return friendly(m), 1
                 except Exception:
                     return line, 1
-            # 支持 \1 反向引用（如“切换到项目 xxxx 对应的账号”）
+            # 支持 \1 反向引用（如“切换到项目 1036 对应的账号”）
             try:
                 return m.expand(friendly), 1
             except re.error:
@@ -1104,6 +1109,12 @@ def api_stats():
 @app.route("/api/state")
 def api_state():
     return jsonify(snapshot())
+
+
+@app.route("/api/copy", methods=["POST"])
+def api_copy():
+    data = request.get_json(silent=True) or {}
+    return jsonify({"ok": bool(copy_text(data.get("text", "")))})
 
 
 @app.route("/api/logs")
@@ -1449,7 +1460,8 @@ def _observe(line):
             set_water(oc.group(1) == "01", "设备回帧")
         fl = _RX_FLOW.search(line)          # 85 采集流水里的真实用量与单价
         if fl:
-            LAST_FLOW.update(use=int(fl.group(1)), rate=int(fl.group(2)),
+            # 费率字段可能是“历史/累计 1925 / 当前 25”，取后一个当前费率
+            LAST_FLOW.update(use=int(fl.group(1)), rate=int(fl.group(3) or fl.group(2)),
                              ts=time.time())
         m = _RX_RSSI.search(line)
         if m:
@@ -1944,11 +1956,59 @@ def close_window():
 
 
 def copy_text(text):
-    """前端「复制全部」调用：写系统剪贴板（WebView2 的 clipboard API 受限）"""
+    """写系统剪贴板（Win32 直写，不依赖 pyperclip；WebView2 剪贴板 API 常受限）。"""
+    s = str(text or "")
+    if not s:
+        return False
     try:
-        import pyperclip
-        pyperclip.copy(str(text or ""))
-        return True
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.windll.kernel32
+        u = ctypes.windll.user32
+        CF_UNICODETEXT = 13
+        GMEM_MOVEABLE = 0x0002
+        k.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        k.GlobalAlloc.restype = wintypes.HGLOBAL
+        k.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        k.GlobalLock.restype = wintypes.LPVOID
+        k.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        k.GlobalUnlock.restype = wintypes.BOOL
+        k.GlobalFree.argtypes = [wintypes.HGLOBAL]
+        u.OpenClipboard.argtypes = [wintypes.HWND]
+        u.OpenClipboard.restype = wintypes.BOOL
+        u.EmptyClipboard.restype = wintypes.BOOL
+        u.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        u.SetClipboardData.restype = wintypes.HANDLE
+        u.CloseClipboard.restype = wintypes.BOOL
+        opened = False
+        for _ in range(6):
+            if u.OpenClipboard(None):
+                opened = True
+                break
+            time.sleep(0.05)
+        if not opened:
+            return False
+        try:
+            if not u.EmptyClipboard():
+                return False
+            data = s.encode("utf-16-le") + b"\x00\x00"
+            h = k.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not h:
+                return False
+            p = k.GlobalLock(h)
+            if not p:
+                k.GlobalFree(h)
+                return False
+            try:
+                ctypes.memmove(p, data, len(data))
+            finally:
+                k.GlobalUnlock(h)
+            if not u.SetClipboardData(CF_UNICODETEXT, h):
+                k.GlobalFree(h)
+                return False
+            return True
+        finally:
+            u.CloseClipboard()
     except Exception:
         return False
 

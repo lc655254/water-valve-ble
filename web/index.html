@@ -233,6 +233,7 @@ select{cursor:pointer}
   border-bottom:1px solid var(--border);flex:0 0 auto}
 .loghead h3{font-size:12px;color:var(--muted);font-weight:600;margin:0}
 .logbtns{margin-left:auto;display:flex;gap:6px;align-items:center}
+#btnFollow{min-width:96px}
 #log{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 14px 14px;
   font-family:var(--mono);font-size:11.5px;
   line-height:1.7;color:var(--log-fg);white-space:pre-wrap;word-break:break-all;cursor:text;
@@ -686,7 +687,7 @@ select{cursor:pointer}
 <script>
 const $ = id => document.getElementById(id);
 const state = { busy:false, wasBusy:false, pending:false, lastLabel:"",
-                logIdx:0, follow:true, detail:false, accounts:[], selPhone:"",
+                logIdx:0, follow:true, unseen:0, detail:false, accounts:[], selPhone:"",
                 polling:false, onboarded:false, seenChangelog:"", waterRunning:null, offlineNow:false,
                 busyLabel:"", deviceInfo:null, clickAt:0 };
 
@@ -1072,9 +1073,12 @@ function logLine(box, frag, cls, content){
   frag.appendChild(d);
   return 1;
 }
+function logBottom(box, slack=24){
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= slack;
+}
 function logAppend(lines){
   const box = $("log");
-  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  const wasBottom = logBottom(box);
   const frag = document.createDocumentFragment();
   let shown = 0;
   lines.forEach(entry => {
@@ -1093,7 +1097,16 @@ function logAppend(lines){
   if (box.querySelector(".logempty")) box.innerHTML = "";
   box.appendChild(frag);
   while (box.childElementCount > 2000) box.removeChild(box.firstChild);
-  if (state.follow && atBottom) box.scrollTop = box.scrollHeight;
+  if (wasBottom){
+    state.follow = true;
+    state.unseen = 0;
+    box.scrollTop = box.scrollHeight;
+    paintFollow();
+    return;
+  }
+  if (state.follow) state.follow = false;
+  state.unseen += shown;
+  paintFollow();
 }
 async function pollLogs(){
   const r = await api("/api/logs?since=" + state.logIdx);
@@ -1115,34 +1128,101 @@ $("btnDetail").addEventListener("click", async ()=>{
   // 重新拉取全部日志并按新视图渲染
   $("log").innerHTML = "";
   state.logIdx = 0;
+  state.unseen = 0;
+  state.follow = true;
+  paintFollow();
   await pollLogs();
-  if (state.follow){ const b = $("log"); b.scrollTop = b.scrollHeight; }
 });
 $("log").addEventListener("scroll", ()=>{
   const box = $("log");
-  const bottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-  if (!bottom && state.follow){ state.follow = false; paintFollow(); }
-});
+  if (logBottom(box)){
+    if (!state.follow || state.unseen){ state.follow = true; state.unseen = 0; paintFollow(); }
+  } else if (state.follow){
+    state.follow = false;
+    paintFollow();
+  }
+}, {passive:true});
 function paintFollow(){
-  $("btnFollow").textContent = state.follow ? "⬇ 自动滚动" : "⏸ 已暂停";
-  $("btnFollow").classList.toggle("primary", !state.follow);
+  const b = $("btnFollow");
+  if (state.follow){
+    b.textContent = "⬇ 跟随中";
+    b.classList.remove("primary");
+    b.title = "新日志自动滚动到底部；向上滚动可暂停";
+  } else {
+    b.textContent = state.unseen ? "⬇ 新日志 " + state.unseen : "⬇ 回到底部";
+    b.classList.add("primary");
+    b.title = "点击回到底部并恢复自动滚动";
+  }
 }
 $("btnFollow").addEventListener("click", ()=>{
-  state.follow = !state.follow; paintFollow();
-  if (state.follow){ const b = $("log"); b.scrollTop = b.scrollHeight; }
+  state.follow = true;
+  state.unseen = 0;
+  const box = $("log");
+  box.scrollTop = box.scrollHeight;
+  paintFollow();
 });
-$("btnClearLog").addEventListener("click", ()=>{ $("log").innerHTML = ""; });
+$("btnClearLog").addEventListener("click", ()=>{
+  $("log").innerHTML = "";
+  state.unseen = 0;
+  state.follow = true;
+  paintFollow();
+});
+function logText(){
+  return Array.from($("log").children)
+    .filter(el => !el.classList.contains("logempty"))
+    .map(el => el.textContent)
+    .join("\n")
+    .trim();
+}
+async function copyLogText(text){
+  try {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_text){
+      if (await window.pywebview.api.copy_text(text)) return true;
+    }
+  } catch(e){}
+  try {
+    const r = await fetch("/api/copy", {method:"POST", headers:{"Content-Type":"application/json"},
+                                        body:JSON.stringify({text})});
+    const j = await r.json();
+    if (j && j.ok) return true;
+  } catch(e){}
+  try {
+    if (navigator.clipboard && window.isSecureContext){
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch(e){}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch(e){ return false; }
+}
 $("btnCopyLog").addEventListener("click", async ()=>{
-  const text = $("log").innerText;
-  if (!text.trim()) { toast("日志为空", "err"); return; }
-  if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_text){
-    await window.pywebview.api.copy_text(text);
+  const text = logText();
+  if (!text){ toast("日志为空", "err"); return; }
+  const b = $("btnCopyLog");
+  b.disabled = true;
+  b.textContent = "复制中…";
+  const ok = await copyLogText(text);
+  b.disabled = false;
+  b.textContent = "复制";
+  if (ok){
     toast("✓ 已复制全部日志", "ok");
+    b.textContent = "✓ 已复制";
+    setTimeout(()=>{ b.textContent = "复制"; }, 1400);
   } else {
-    try { await navigator.clipboard.writeText(text); toast("✓ 已复制", "ok"); }
-    catch(e){ toast("复制失败，可手动选择文本", "err"); }
+    toast("复制失败，可手动选择文本", "err");
   }
 });
+paintFollow();
 
 /* ── 操作 ── */
 /* 用后端记下的「最近一次操作真实结果」播报，避免把「水表没连上」说成「本地服务无响应」，
@@ -1571,7 +1651,7 @@ function showDevicePicker(res){
     const rssi = d.rssi ?? -999;
     const weak = rssi < -80;
     // 名字优先级：云端档案名 > 已保存设备的界面显示名 > 广播名 > 未命名
-    //（已保存的那台一定有界面显示名，不用等云端接口也能显示「热水表25 · X栋3层xxx房」）
+    //（已保存的那台一定有界面显示名，不用等云端接口也能显示「热水表25 · X12公寓3层330房」）
     const disp = d.cloud_name
       || (d.is_saved && state.deviceInfo && (state.deviceInfo.display || state.deviceInfo.cloud_full))
       || d.name || "(未命名)";
