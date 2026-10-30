@@ -1,5 +1,5 @@
 ﻿#define MyAppName "蓝牙水库"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "lc655254"
 #define MyAppURL "https://github.com/lc655254/water-valve-ble"
 #define MyAppExeName "蓝牙水库安全版.exe"
@@ -19,6 +19,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=Output
 OutputBaseFilename=蓝牙水库_Setup_v{#MyAppVersion}
+SetupIconFile=..\assets\app.ico
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
@@ -31,7 +32,7 @@ LicenseFile=LICENSE.txt
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.0.1.0
+VersionInfoVersion=1.0.2.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoCompany={#MyAppPublisher}
