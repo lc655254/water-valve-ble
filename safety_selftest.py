@@ -58,6 +58,7 @@ def basic(d):
     s3.request_close_sync("gate")
     ok, _ = s3.before_open("TEST", 2)
     assert ok
+    assert vs.read_journal(d).get("opened_ts") is None
     s3.mark_closed("done")
     print("open gate ok")
     print("basic PASS")

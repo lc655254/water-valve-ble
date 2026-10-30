@@ -637,9 +637,11 @@ class Safety:
                     reason = f"超过 {self.max_open} 分钟"
                 elif age > 25 and not self._closing:
                     reason = "心跳超时"
-                else:
-                    opened = float(st.get("opened_ts") or started)
-                    cost = (now - opened) / 60.0 * 12.0 * self._rate()
+                elif st.get("state") == "open":
+                    opened = float(st.get("opened_ts") or 0)
+                    if opened < started:
+                        opened = started
+                    cost = max(0.0, (now - opened) / 60.0 * 12.0 * self._rate())
                     if self.max_cost and cost >= self.max_cost:
                         reason = f"预计费用达到 ¥{self.max_cost:.2f}"
                 if reason:
@@ -661,11 +663,13 @@ class Safety:
         now = _now()
         write_journal(self.dir, state="opening", mac=mac, device_id=device_id,
                       mode=mode, order_no=order_no, pid=os.getpid(),
-                      boot_ts=boot_ts(), started_ts=now, heartbeat_ts=now,
-                      deadline_ts=now + self.max_open * 60,
+                      boot_ts=boot_ts(), started_ts=now, opened_ts=None,
+                      heartbeat_ts=now, deadline_ts=now + self.max_open * 60,
                       max_open_min=self.max_open,
                       max_cost_yuan=self.max_cost,
-                      closed_ts=None, close_reason="", last_error="")
+                      closed_ts=None, closed_by="", close_reason="",
+                      close_attempts=0, guard_attempts=0, last_error="",
+                      upload_ok=None)
         touch_heartbeat(self.dir)
         return True, ""
 
