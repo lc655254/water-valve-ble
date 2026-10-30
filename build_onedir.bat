@@ -1,6 +1,7 @@
 @echo off
 cd /d "%~dp0"
 python -m PyInstaller --noconfirm --clean --noconsole --name "蓝牙水库安全版" ^
+  --icon "assets\app.ico" ^
   --add-data "web;web" ^
   --hidden-import valve_guard --hidden-import valve_safety ^
   --hidden-import webview.platforms.edgechromium --hidden-import webview.platforms.winforms ^

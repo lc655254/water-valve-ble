@@ -23,8 +23,12 @@ OPEN_STATES = ("opening", "open", "closing")
 WM_CLOSE = 0x0010
 WM_QUERYENDSESSION = 0x0011
 WM_ENDSESSION = 0x0016
+WM_SETICON = 0x0080
 WM_POWERBROADCAST = 0x0218
 WM_SAFETY_PING = 0x8001
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x00000010
+LR_DEFAULTSIZE = 0x00000040
 PBT_APMSUSPEND = 0x0004
 BROADCAST_QUERY_DENY = 0xFFFFFFFF
 GWLP_WNDPROC = -4
@@ -304,6 +308,7 @@ class WindowsHooks:
         self._keep = []
         self._old = None
         self._hwnd = None
+        self._icons = []
         self._blocking = False
         if IS_WIN:
             self._declare()
@@ -347,6 +352,16 @@ class WindowsHooks:
             u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
                                        wintypes.WPARAM, wintypes.LPARAM]
             u.PostMessageW.restype = wintypes.BOOL
+            u.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                       wintypes.WPARAM, wintypes.LPARAM]
+            u.SendMessageW.restype = LRESULT
+            u.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
+                                     wintypes.UINT, ctypes.c_int, ctypes.c_int,
+                                     wintypes.UINT]
+            u.LoadImageW.restype = wintypes.HANDLE
+            ctypes.windll.shell32.ExtractIconW.argtypes = [
+                wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT]
+            ctypes.windll.shell32.ExtractIconW.restype = wintypes.HICON
         except Exception:
             pass
 
@@ -378,6 +393,7 @@ class WindowsHooks:
 
     def _subclass(self, hwnd):
         self._hwnd = hwnd
+        self._set_icon(hwnd)
         proto = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT,
                                    wintypes.WPARAM, wintypes.LPARAM)
         self._old = (self.u.GetWindowLongPtrW(hwnd, GWLP_WNDPROC)
@@ -401,6 +417,24 @@ class WindowsHooks:
         else:
             self.u.SetWindowLongW(hwnd, GWLP_WNDPROC,
                                   ctypes.cast(p, ctypes.c_void_p).value)
+
+    def _set_icon(self, hwnd):
+        try:
+            hicon = 0
+            if getattr(sys, "frozen", False):
+                hicon = ctypes.windll.shell32.ExtractIconW(None, sys.executable, 0)
+            else:
+                p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "assets", "app.ico")
+                if os.path.exists(p):
+                    hicon = self.u.LoadImageW(None, p, IMAGE_ICON, 0, 0,
+                                              LR_LOADFROMFILE | LR_DEFAULTSIZE)
+            if hicon:
+                self._icons.append(hicon)
+                self.u.SendMessageW(hwnd, WM_SETICON, 1, hicon)
+                self.u.SendMessageW(hwnd, WM_SETICON, 0, hicon)
+        except Exception:
+            pass
 
     def _call_old(self, hwnd, msg, wp, lp):
         try:

@@ -16,5 +16,5 @@ if not exist "%ISCC%" (
   exit /b 1
 )
 "%ISCC%" "installer\water_valve.iss"
-if exist "installer\Output\蓝牙水库_Setup_v1.0.1.exe" copy /y "installer\Output\蓝牙水库_Setup_v1.0.1.exe" "蓝牙水库_Setup_v1.0.1.exe" >nul
+if exist "installer\Output\蓝牙水库_Setup_v1.0.2.exe" copy /y "installer\Output\蓝牙水库_Setup_v1.0.2.exe" "蓝牙水库_Setup_v1.0.2.exe" >nul
 pause

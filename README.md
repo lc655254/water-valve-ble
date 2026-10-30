@@ -1,3 +1,5 @@
+<img src="assets/app.png" width="72" height="72" align="right" alt="蓝牙水库图标">
+
 # WaterValveBLE · 蓝牙水控
 
 KLCXKJ-Water（base42）蓝牙水表的本地控制客户端：Flask + pywebview 界面、BLE 协议实现、零用量结算，以及一套防止“开着水关机后继续扣费”的安全看门狗。
