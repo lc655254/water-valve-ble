@@ -45,7 +45,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private TextView heroTitle, heroSub, btnToggleLogin, btnToggleLog;
     private TextView statLastMain, statLastSub, statTotalMain, statTotalSub;
     private EditText phone, code;
-    private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater, btnCopyLog;
+    private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater;
+    private TextView btnCopyLog;
     private TextView btnCheckUpdate;
     private LinearLayout deviceList, header, bottomBar, loginFields, logBody;
     private ScrollView logScroll;
@@ -183,7 +184,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.4.3");
+        appendLog("安卓版启动，版本 0.4.4");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             int end = Math.min(1500, crash.length());
