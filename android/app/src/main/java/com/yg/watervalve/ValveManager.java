@@ -38,10 +38,20 @@ public final class ValveManager {
         public final BluetoothDevice device;
         public final String name;
         public final int rssi;
+        public final boolean bound;
+        public final boolean cloudChecked;
+
         public ScanItem(BluetoothDevice device, String name, int rssi) {
+            this(device, name, rssi, false, false);
+        }
+
+        public ScanItem(BluetoothDevice device, String name, int rssi,
+                        boolean bound, boolean cloudChecked) {
             this.device = device;
             this.name = name;
             this.rssi = rssi;
+            this.bound = bound;
+            this.cloudChecked = cloudChecked;
         }
     }
 
@@ -61,6 +71,7 @@ public final class ValveManager {
     private final BluetoothAdapter adapter;
     private final List<ScanItem> devices = new ArrayList<>();
     private final Set<String> cloudLooked = new HashSet<>();
+    private final Set<String> cloudChecked = new HashSet<>();
     private static final String GENERIC_NAME = "KLCXKJ 水表";
     private Listener listener;
     private Cloud.Session session;
@@ -178,6 +189,8 @@ public final class ValveManager {
         if (busy) return;
         main.post(() -> {
             devices.clear();
+            cloudLooked.clear();
+            cloudChecked.clear();
             notifyDevices();
         });
         io.execute(() -> ble.startScan());
@@ -719,16 +732,24 @@ public final class ValveManager {
         if (session == null || addr == null || addr.isEmpty()) return;
         try {
             Cloud.DeviceInfo info = Cloud.queryDevice(session, addr);
-            if (info == null && addr != null && addr.equalsIgnoreCase(bleAddr)
+            if ((info == null || !info.found) && addr.equalsIgnoreCase(bleAddr)
                     && mac != null && !mac.isEmpty() && !mac.equalsIgnoreCase(addr)) {
-                info = Cloud.queryDevice(session, mac);
+                Cloud.DeviceInfo alt = Cloud.queryDevice(session, mac);
+                if (alt != null && alt.found) info = alt;
             }
-            if (info == null || info.deviceName == null || info.deviceName.isEmpty()) return;
+            if (info == null) return;
+            if (!info.found || info.deviceName == null || info.deviceName.isEmpty()) {
+                if (knownCloud(addr).isEmpty()) {
+                    main.post(() -> markUnbound(addr));
+                }
+                return;
+            }
             final String name = info.deviceName.trim();
             if (name.isEmpty()) return;
             rememberCloudName(addr, name);
             main.post(() -> {
-                updateListName(addr, name);
+                cloudChecked.add(addr);
+                updateListName(addr, name, true, true);
                 if (addr.equalsIgnoreCase(bleAddr)) {
                     deviceName = name;
                     saveDevice();
@@ -738,6 +759,26 @@ public final class ValveManager {
                 notifyDevices();
             });
         } catch (Exception ignored) {
+        }
+    }
+
+    private void markUnbound(String addr) {
+        if (addr == null || addr.isEmpty()) return;
+        cloudChecked.add(addr);
+        boolean changed = false;
+        for (int i = 0; i < devices.size(); i++) {
+            ScanItem it = devices.get(i);
+            if (addr.equalsIgnoreCase(addressOf(it.device))) {
+                if (it.bound || !it.cloudChecked) {
+                    devices.set(i, new ScanItem(it.device, it.name, it.rssi, false, true));
+                    changed = true;
+                }
+                break;
+            }
+        }
+        if (changed) {
+            sortDevices();
+            notifyDevices();
         }
     }
 
@@ -774,13 +815,43 @@ public final class ValveManager {
             ScanItem it = devices.get(i);
             if (addr.equalsIgnoreCase(addressOf(it.device))) {
                 if (!name.equals(it.name)) {
-                    devices.set(i, new ScanItem(it.device, name, it.rssi));
+                    devices.set(i, new ScanItem(it.device, name, it.rssi,
+                            it.bound, it.cloudChecked));
                     changed = true;
                 }
                 break;
             }
         }
-        if (changed) notifyDevices();
+        if (changed) {
+            sortDevices();
+            notifyDevices();
+        }
+    }
+
+    private void updateListName(String addr, String name, boolean bound, boolean checked) {
+        if (addr == null || addr.isEmpty() || name == null || name.isEmpty()) return;
+        boolean changed = false;
+        for (int i = 0; i < devices.size(); i++) {
+            ScanItem it = devices.get(i);
+            if (addr.equalsIgnoreCase(addressOf(it.device))) {
+                if (!name.equals(it.name) || it.bound != bound || it.cloudChecked != checked) {
+                    devices.set(i, new ScanItem(it.device, name, it.rssi, bound, checked));
+                    changed = true;
+                }
+                break;
+            }
+        }
+        if (changed) {
+            sortDevices();
+            notifyDevices();
+        }
+    }
+
+    private void sortDevices() {
+        devices.sort((a, b) -> {
+            if (a.bound != b.bound) return a.bound ? -1 : 1;
+            return Integer.compare(b.rssi, a.rssi);
+        });
     }
 
     private static String addressOf(BluetoothDevice d) {
@@ -958,6 +1029,8 @@ public final class ValveManager {
                 String actual = name == null ? "" : name.trim();
                 if (!actual.isEmpty()) rememberName(addr, actual);
                 String cloud = knownCloud(addr);
+                boolean bound = !cloud.isEmpty();
+                boolean checked = bound || cloudChecked.contains(addr);
                 String nm;
                 if (!cloud.isEmpty()) nm = cloud;
                 else if (!actual.isEmpty()) nm = actual;
@@ -976,11 +1049,16 @@ public final class ValveManager {
                             && !old.name.isEmpty() && !GENERIC_NAME.equals(old.name)) {
                         nm = old.name;
                     }
-                    boolean changed = old.name == null || !old.name.equals(nm);
-                    devices.set(idx, new ScanItem(device, nm, rssi));
+                    bound = bound || old.bound;
+                    checked = checked || old.cloudChecked;
+                    boolean changed = old.name == null || !old.name.equals(nm)
+                            || old.bound != bound || old.cloudChecked != checked;
+                    devices.set(idx, new ScanItem(device, nm, rssi, bound, checked));
+                    sortDevices();
                     if (changed) notifyDevices();
                 } else {
-                    devices.add(new ScanItem(device, nm, rssi));
+                    devices.add(new ScanItem(device, nm, rssi, bound, checked));
+                    sortDevices();
                     notifyDevices();
                 }
                 if (session != null && !addr.isEmpty() && !cloudLooked.contains(addr)) {
