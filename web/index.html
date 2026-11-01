@@ -262,17 +262,30 @@ select{cursor:pointer}
 
 /* ── 弹窗 ── */
 .mask{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);
-  display:none;place-items:center;z-index:300;padding:14px;box-sizing:border-box}
+  display:none;place-items:center;z-index:300;padding:14px;box-sizing:border-box;overflow:auto}
 .mask.show{display:grid}
 .dialog{width:380px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px;
   /* 内容再长也不会把标题/按钮顶出屏幕：弹窗自身限高，正文区滚动 */
-  max-height:100%;display:flex;flex-direction:column;overflow:hidden;
+  max-height:calc(100vh - 28px);display:flex;flex-direction:column;overflow:hidden;
   animation:pop .18s var(--ease)}
 .dialog.wide{width:660px;max-width:calc(100vw - 32px)}
 /* 选择设备这类「列表型」弹窗：高度固定，列表占满中间并自己滚动，
    标题/提示/按钮都不动 —— 设备多少台都不会把版面顶歪 */
-.dialog.tall{height:min(560px,100%);width:660px;max-width:calc(100vw - 32px)}
+.dialog.tall{height:min(600px,calc(100vh - 28px));width:660px;max-width:calc(100vw - 32px)}
+/* 公告：标题/正文居中，图片完整等比显示 */
+.dialog.ann{width:660px;max-width:calc(100vw - 32px)}
+.dialog.ann h2{text-align:center;font-size:22px;margin:2px 0 8px}
+.dialog.ann .annbody{text-align:center;font-size:14px;line-height:2;white-space:pre-wrap;color:var(--text)}
+.dialog.ann .annimg{max-height:420px;margin:14px auto 2px}
+/* 省钱账本：加宽、放大卡片、放松行距 */
+.dialog.stats{width:720px;max-width:calc(100vw - 32px)}
+.dialog.stats .stat-grid{gap:10px;margin:10px 0 4px}
+.dialog.stats .stat-grid>div{padding:8px 8px}
+.dialog.stats .stat-grid b{font-size:14.5px}
+.dialog.stats .stat-grid span{font-size:11px}
+.dialog.stats .stat-row{padding:3px 1px;line-height:1.55}
+.dialog.stats .stat-sec{margin:10px 0 3px}
 .dialog.tall #mBody{display:flex;flex-direction:column}
 .dialog.tall .devicelist{flex:1 1 auto;min-height:140px;overflow-y:auto;overflow-x:hidden}
 .dialog.tall .devtips{flex:0 0 auto;max-height:34%;overflow-y:auto}
@@ -849,7 +862,7 @@ function layoutIsland(){
 
 /* ── 应用内弹窗（替代 prompt/confirm） ── */
 let modalClose = null;
-function dialog({title, desc="", body="", buttons, onMount, wide=false, tall=false}){
+function dialog({title, desc="", body="", buttons, onMount, wide=false, tall=false, ann=false, stats=false}){
   $("mTitle").textContent = title;
   $("mDesc").textContent = desc;
   $("mDesc").style.display = desc ? "block" : "none";
@@ -857,6 +870,8 @@ function dialog({title, desc="", body="", buttons, onMount, wide=false, tall=fal
   const _dlg = $("modal").querySelector(".dialog");
   _dlg.classList.toggle("wide", !!wide);
   _dlg.classList.toggle("tall", !!tall);
+  _dlg.classList.toggle("ann", !!ann);
+  _dlg.classList.toggle("stats", !!stats);
   const acts = $("mActs"); acts.innerHTML = "";
   const close = (v) => { $("modal").classList.remove("show"); const r = modalClose; modalClose = null; if (r) r(v); };
   (buttons||[]).forEach(b => {
@@ -905,7 +920,7 @@ function showAnnouncement(a){
     }});
   }
   buttons.push({label: a.button || "我知道了", primary:true});
-  dialog({title: a.title || "公告", body: html, buttons, wide:true}).then(() => {
+  dialog({title: a.title || "公告", body: html, buttons, wide:true, ann:true}).then(() => {
     if (a.once !== false){
       try{ localStorage.setItem("wv-ann-seen", a.id || ""); }catch(e){}
     }
@@ -1595,6 +1610,7 @@ async function showStats(){
     title: "省钱账本",
     desc: "只读设备流水与云端返回，不上传真实用量、不产生扣费",
     wide: true,
+    stats: true,
     body: `
       <div class="stat-hero">
         <div class="num"><small>¥</small>${yuanTxt(r.total_saved)}</div>
