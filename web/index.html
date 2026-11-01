@@ -201,6 +201,20 @@ select{cursor:pointer}
 .big.doing{background:linear-gradient(135deg,var(--surface-2) 0%,var(--surface) 100%);
   color:var(--text);border:1px solid var(--border);animation:none}
 .tools{display:flex;flex-direction:column;gap:8px}
+.updot{display:none;width:7px;height:7px;border-radius:50%;background:var(--danger);margin-left:6px;
+  vertical-align:middle;box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 18%,transparent)}
+.updot.on{display:inline-block}
+.upbar{height:9px;background:var(--surface-2);border-radius:5px;overflow:hidden;margin:10px 0 7px}
+.upbar i{display:block;height:100%;width:0;border-radius:5px;
+  background:linear-gradient(90deg,var(--accent),var(--accent-h));transition:width .2s linear}
+.upmeta{font-size:12px;color:var(--muted);line-height:1.75}
+.upmirrors{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.upmirror{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;color:var(--muted)}
+.upmirror b{color:var(--text);font-weight:600;white-space:nowrap}
+.upmirror.best b,.upmirror.best{color:var(--ok)}
+.upnotes{max-height:170px;overflow:auto;background:var(--surface-2);border-radius:8px;padding:10px;
+  font-size:12px;white-space:pre-wrap;color:var(--muted);margin-top:10px;
+  font-family:var(--font);line-height:1.65}
 /* ── 省钱账本（整体做矮一点，一屏放下，不用滚） ── */
 .stat-hero{text-align:center;padding:2px 0 4px}
 .stat-hero .num{font-size:28px;font-weight:800;color:var(--ok);line-height:1.05;letter-spacing:-.5px}
@@ -274,6 +288,11 @@ select{cursor:pointer}
 .hint{font-size:12px;color:var(--muted);min-height:16px}
 .hint.bad{color:var(--danger)} .hint.good{color:var(--ok)}
 .actions-row{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex:0 0 auto}
+/* GitHub 公告 */
+.annbody{font-size:13.5px;line-height:1.95;white-space:pre-wrap;color:var(--text);
+  user-select:text;word-break:break-word}
+.annimg{display:block;width:100%;max-height:420px;object-fit:contain;margin:12px 0 2px;
+  border-radius:10px;background:var(--surface-2)}
 
 /* ── 设备列表：两行式，宽松排布，无横向滚动 ── */
 .devicelist{max-height:none;overflow-y:auto;
@@ -605,6 +624,10 @@ select{cursor:pointer}
       <button class="btn" id="btnStats" title="累计省下多少、本次多少、日均/周均/月均/年均">省钱账本</button>
       <button class="btn" id="btnInfo">账户信息</button>
       <button class="btn" id="btnBill">本月账单</button>
+      <button class="btn" id="btnAnnouncement" title="查看公告" style="display:none">公告</button>
+      <button class="btn" id="btnUpdate" title="从 GitHub Release 检查更新">
+        <span id="updateText">检查更新</span><span class="updot" id="updateDot"></span>
+      </button>
     </div>
   </div>
   <div class="logwrap">
@@ -857,6 +880,60 @@ function confirmDialog(title, desc){
   return dialog({title, desc, buttons:[
     {label:"取消", onClick:c=>c(false)},
     {label:"确定", danger:true, primary:true, onClick:c=>c(true)}]});
+}
+
+/* ── GitHub 公告（docs/announcement.json） ── */
+let announcement = null;
+function annEsc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+function showAnnouncement(a){
+  if (!a) return;
+  let html = '<div class="annbody">' + annEsc(a.body || "") + "</div>";
+  (a.images || []).forEach(u => {
+    const raw = annEsc(u);
+    if (!/^https:\/\//i.test(u)) return;
+    html += `<img class="annimg" src="${raw}" data-raw="${raw}" alt="公告图片"
+      onerror="if(!this.dataset.p && this.src.indexOf('gh-proxy.com')<0){this.dataset.p='1';this.src='https://gh-proxy.com/'+this.dataset.raw;}else{this.style.display='none';}">`;
+  });
+  const buttons = [];
+  if (a.link && /^https?:\/\//i.test(a.link)){
+    buttons.push({label: a.linkText || "查看详情", onClick: () => {
+      try{ window.open(a.link, "_blank"); }catch(e){}
+    }});
+  }
+  buttons.push({label: a.button || "我知道了", primary:true});
+  dialog({title: a.title || "公告", body: html, buttons, wide:true}).then(() => {
+    if (a.once !== false){
+      try{ localStorage.setItem("wv-ann-seen", a.id || ""); }catch(e){}
+    }
+  });
+}
+async function checkAnnouncement(){
+  const r = await api("/api/announcement", undefined, {timeout:15000, retry:1});
+  const btn = $("btnAnnouncement");
+  if (!r || !r.ok || !r.data){
+    if (btn) btn.style.display = "none";
+    return;
+  }
+  announcement = r.data;
+  if (btn){
+    btn.style.display = "inline-flex";
+    btn.onclick = () => showAnnouncement(announcement);
+  }
+  let seen = "";
+  try{ seen = localStorage.getItem("wv-ann-seen") || ""; }catch(e){}
+  if (announcement.once !== false && seen === announcement.id) return;
+  const tryShow = () => {
+    const busy = $("modal").classList.contains("show")
+              || $("scanMask").classList.contains("show")
+              || $("gate").classList.contains("show");
+    if (busy){ setTimeout(tryShow, 1200); return; }
+    showAnnouncement(announcement);
+  };
+  tryShow();
 }
 
 /* ── 主题与主题色（记忆在后端 ui_prefs.json，重启仍然记得） ── */
@@ -1223,6 +1300,156 @@ $("btnCopyLog").addEventListener("click", async ()=>{
   }
 });
 paintFollow();
+
+/* ── 自动更新（GitHub Release + 镜像测速） ── */
+const escHtml = s => String(s || "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let upd = {info:null, ready:false, timer:null, polling:false};
+function fmtMB(n){ return (Number(n || 0) / 1048576).toFixed(1); }
+function paintUpdateDot(on){ $("updateDot").classList.toggle("on", !!on); }
+
+function showUpdateDialog(r){
+  const notes = escHtml((r.notes || "").slice(0, 4000));
+  const digest = escHtml((r.digest || "").slice(0, 16));
+  dialog({
+    title: "发现新版本 " + r.latest,
+    desc: "当前 " + r.current + " · GitHub 最新 " + r.latest,
+    wide: true,
+    body: `<div class="upmeta">安装包：${escHtml(r.asset || "")} · ${fmtMB(r.size)} MB` +
+          (digest ? ` · SHA256 ${digest}…` : "") + `</div>` +
+          (notes ? `<pre class="upnotes">${notes}</pre>` : ""),
+    buttons: [
+      {label:"稍后", onClick:c=>c()},
+      {label:"下载并安装", primary:true, onClick:c=>{ c(); startUpdateDownload(); }}
+    ]
+  });
+}
+
+async function checkUpdate(manual=false){
+  if (manual) toast("正在检查 GitHub Release…", "", 1800);
+  const r = await api("/api/update/check" + (manual ? "?force=1" : ""),
+                      undefined, {timeout:25000});
+  if (!r || !r.ok){
+    if (manual) toast((r && r.msg) || "检查更新失败", "err", 5000);
+    return;
+  }
+  upd.info = r;
+  if (r.has_update){
+    paintUpdateDot(true);
+    $("updateText").textContent = "新版本 " + r.latest;
+    if (manual) showUpdateDialog(r);
+    else toast("发现新版本 " + r.latest + "，点「新版本」更新", "ok", 6000);
+  } else {
+    paintUpdateDot(false);
+    $("updateText").textContent = "检查更新";
+    if (manual) dialog({
+      title:"已是最新版本",
+      desc:`当前 ${r.current}，GitHub 最新 ${r.latest}`,
+      buttons:[{label:"知道了", primary:true}]
+    });
+  }
+}
+
+function openUpdateProgress(){
+  if (upd.timer){ clearInterval(upd.timer); upd.timer = null; }
+  dialog({
+    title:"正在更新",
+    desc:"先对 GitHub 和镜像做 256KB 测速，选最快的下载",
+    wide:true,
+    body:`<div id="upPhase" class="upmeta">准备中…</div>
+          <div class="upbar"><i id="upBar"></i></div>
+          <div id="upMeta" class="upmeta"></div>
+          <div id="upMirrors" class="upmirrors"></div>`,
+    buttons:[{label:"后台下载", onClick:c=>c()}]
+  });
+  pollUpdate();
+  upd.timer = setInterval(pollUpdate, 700);
+}
+
+function renderMirrors(list, chosen){
+  const box = $("upMirrors");
+  if (!box) return;
+  box.innerHTML = (list || []).slice(0, 8).map(m => {
+    const best = chosen && m.label === chosen;
+    const val = m.ok
+      ? (m.speed >= 1024 ? (m.speed / 1024).toFixed(2) + " MB/s" : Math.round(m.speed) + " KB/s")
+      : "不可用";
+    return `<div class="upmirror${best ? " best" : ""}" title="${escHtml(m.error || "")}">` +
+           `<span>${best ? "✓ " : ""}${escHtml(m.label)}</span><b>${val}</b></div>`;
+  }).join("");
+}
+
+async function pollUpdate(){
+  if (upd.polling) return;
+  upd.polling = true;
+  try{
+    const s = await api("/api/update/status", undefined, {timeout:8000});
+    if (!s) return;
+    const bar = $("upBar"), phase = $("upPhase"), meta = $("upMeta");
+    if (bar){
+      const pct = s.total ? Math.min(100, s.downloaded / s.total * 100)
+                          : (s.state === "done" ? 100 : 0);
+      bar.style.width = pct.toFixed(1) + "%";
+      if (s.state === "testing") phase.textContent = "正在测速：GitHub + 镜像…";
+      else if (s.state === "downloading") phase.textContent = "下载中：" + (s.chosen || "");
+      else if (s.state === "done") phase.textContent = "下载完成，SHA256 校验通过";
+      else if (s.state === "error") phase.textContent = "下载失败";
+      const sp = s.speed >= 1024 ? (s.speed / 1024).toFixed(2) + " MB/s"
+                                 : Math.round(s.speed || 0) + " KB/s";
+      meta.textContent = s.total ? `${fmtMB(s.downloaded)} / ${fmtMB(s.total)} MB · ${sp}` : "";
+    }
+    if (s.mirrors && s.mirrors.length) renderMirrors(s.mirrors, s.chosen);
+    if (s.state === "done"){
+      clearInterval(upd.timer); upd.timer = null; upd.ready = true;
+      $("updateText").textContent = "安装更新";
+      paintUpdateDot(true);
+      if (bar) setTimeout(showInstallDialog, 300);
+      else toast("更新已下载，点「安装更新」安装", "ok", 6000);
+    } else if (s.state === "error"){
+      clearInterval(upd.timer); upd.timer = null;
+      if (phase) phase.textContent = "下载失败：" + (s.error || "");
+      toast((s.error ? "更新下载失败：" + s.error : "更新下载失败"), "err", 7000);
+    }
+  } finally {
+    upd.polling = false;
+  }
+}
+
+function showInstallDialog(){
+  dialog({
+    title:"更新已下载",
+    desc:"安装包已通过 SHA256 校验。安装时程序会退出，完成后自动重启。",
+    body:`<div class="upmeta">安装会保留 config.json、账号和设备设置。<br>请确认水阀没有在放水。</div>`,
+    buttons:[
+      {label:"稍后", onClick:c=>c()},
+      {label:"立即安装并重启", primary:true, onClick:c=>{ c(); installUpdate(); }}
+    ]
+  });
+}
+
+async function installUpdate(){
+  const r = await api("/api/update/install", {}, {timeout:15000});
+  if (!r || !r.ok){ toast((r && r.msg) || "安装失败", "err", 6000); return; }
+  dialog({title:"正在退出并安装", desc:"安装完成后会自动重新打开蓝牙水库。", buttons:[]});
+}
+
+async function startUpdateDownload(){
+  const r = await api("/api/update/download", {}, {timeout:15000});
+  if (!r || !r.ok){ toast((r && r.msg) || "启动下载失败", "err", 5000); return; }
+  openUpdateProgress();
+}
+
+$("btnUpdate").addEventListener("click", async ()=>{
+  if (upd.ready){ showInstallDialog(); return; }
+  if (upd.timer){ openUpdateProgress(); return; }
+  if (upd.info && upd.info.has_update){ showUpdateDialog(upd.info); return; }
+  await checkUpdate(true);
+});
+
+setTimeout(()=>checkUpdate(false), 5000);
+setInterval(()=>{
+  if (!upd.ready && !(upd.info && upd.info.has_update)) checkUpdate(false);
+}, 6 * 3600 * 1000);
 
 /* ── 操作 ── */
 /* 用后端记下的「最近一次操作真实结果」播报，避免把「水表没连上」说成「本地服务无响应」，
@@ -2016,6 +2243,7 @@ async function startPolling(){
   await pollLogs();
   setInterval(refresh, 1500);
   setInterval(pollLogs, 700);
+  setTimeout(checkAnnouncement, 2200);
 }
 </script>
 </body>
