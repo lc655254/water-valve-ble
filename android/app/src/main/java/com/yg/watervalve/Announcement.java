@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -32,6 +33,7 @@ public final class Announcement {
             "https://raw.githubusercontent.com/lc655254/water-valve-ble/main/docs/announcement.json";
     private static final String PREF = "water_valve";
     private static final String K_SEEN = "announcement_seen";
+    private static final String K_IMG_FP = "announcement_img_fp";
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
@@ -66,6 +68,7 @@ public final class Announcement {
                 try {
                     info = parse(app, new JSONObject(text));
                     writeCache(app, text);
+                    syncImageCache(app, info);
                 } catch (Exception e) {
                     error = e.getClass().getSimpleName();
                 }
@@ -150,10 +153,24 @@ public final class Announcement {
         if (url == null || url.isEmpty() || view == null) return;
         final Context app = context.getApplicationContext();
         IO.execute(() -> {
-            Bitmap bmp = fetchImage(url);
+            File f = imageCacheFile(app, url);
+            byte[] data = readFile(f);
+            if (data == null || data.length == 0) {
+                data = fetchImageBytes(url);
+                if (data != null && data.length > 0) writeFile(f, data);
+            }
+            Bitmap bmp = decodeImage(data);
+            if (bmp == null && f.exists()) {
+                // 本地缓存损坏：删掉再拉一次
+                f.delete();
+                data = fetchImageBytes(url);
+                if (data != null && data.length > 0) writeFile(f, data);
+                bmp = decodeImage(data);
+            }
+            final Bitmap b = bmp;
             MAIN.post(() -> {
-                if (bmp != null) {
-                    view.setImageBitmap(bmp);
+                if (b != null) {
+                    view.setImageBitmap(b);
                     view.setVisibility(android.view.View.VISIBLE);
                 } else {
                     view.setVisibility(android.view.View.GONE);
@@ -162,11 +179,43 @@ public final class Announcement {
         });
     }
 
-    private static Bitmap fetchImage(String url) {
+    private static void syncImageCache(Context c, Info info) {
+        if (info == null) return;
+        StringBuilder sb = new StringBuilder();
+        sb.append(info.id).append('\n').append(info.title).append('\n').append(info.body);
+        for (String u : info.images) sb.append('\n').append(u);
+        String fp = sb.toString();
+        SharedPreferences p = prefs(c);
+        if (!fp.equals(p.getString(K_IMG_FP, ""))) {
+            deleteRecursive(new File(c.getCacheDir(), "ann_img"));
+            p.edit().putString(K_IMG_FP, fp).apply();
+        }
+    }
+
+    private static File imageCacheFile(Context c, String url) {
+        File dir = new File(c.getCacheDir(), "ann_img");
+        if (!dir.exists()) dir.mkdirs();
+        return new File(dir, sha256(url) + ".img");
+    }
+
+    private static String sha256(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : d) sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(s.hashCode());
+        }
+    }
+
+    private static byte[] fetchImageBytes(String url) {
         String[] prefixes = {"", "https://gh-proxy.com/", "https://ghproxy.net/"};
         for (String p : prefixes) {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(p + url).openConnection();                c.setConnectTimeout(8000);
+                HttpURLConnection c = (HttpURLConnection) new URL(p + url).openConnection();
+                c.setConnectTimeout(8000);
                 c.setReadTimeout(10000);
                 c.setRequestProperty("User-Agent", "WaterValve-Android");
                 c.setRequestProperty("Accept", "image/*");
@@ -179,20 +228,54 @@ public final class Announcement {
                     data = readBytes(in);
                 }
                 c.disconnect();
-                if (data != null && data.length > 0) {
-                    BitmapFactory.Options bounds = new BitmapFactory.Options();
-                    bounds.inJustDecodeBounds = true;
-                    BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
-                    int sample = 1;
-                    while (bounds.outWidth / sample > 1200) sample *= 2;
-                    BitmapFactory.Options opts = new BitmapFactory.Options();
-                    opts.inSampleSize = sample;
-                    return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
-                }
+                if (data != null && data.length > 0) return data;
             } catch (Exception ignored) {
             }
         }
         return null;
+    }
+
+    private static Bitmap decodeImage(byte[] data) {
+        if (data == null || data.length == 0) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        int sample = 1;
+        while (bounds.outWidth / sample > 1200) sample *= 2;
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inSampleSize = sample;
+        return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+    }
+
+    private static byte[] readFile(File f) {
+        if (f == null || !f.exists()) return null;
+        try (FileInputStream in = new FileInputStream(f)) {
+            return readBytes(in);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void writeFile(File f, byte[] data) {
+        try {
+            File parent = f.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            try (FileOutputStream out = new FileOutputStream(f)) {
+                out.write(data);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void deleteRecursive(File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File child : children) deleteRecursive(child);
+            }
+        }
+        f.delete();
     }
 
     private static String readAll(InputStream in) throws Exception {
