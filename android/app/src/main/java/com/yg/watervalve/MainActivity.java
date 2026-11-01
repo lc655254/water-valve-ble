@@ -17,12 +17,17 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.transition.AutoTransition;
+import android.transition.TransitionManager;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -51,6 +56,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private LinearLayout deviceList, header, bottomBar, loginFields, logBody;
     private ScrollView logScroll;
     private View statusBarScrim, root;
+    private ScrollView scroll;
+    private View content, heroBlock, accountCard, deviceCard, statsCard, logCard;
     private final StringBuilder logBuf = new StringBuilder();
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.CHINA);
     private boolean running;
@@ -58,6 +65,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private boolean logExpanded;
     private ProgressDialog updateProgress;
     private Updater.Info pendingUpdate;
+    private String lastHeroTitle = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,6 +104,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         bottomBar = findViewById(R.id.bottomBar);
         statusBarScrim = findViewById(R.id.statusBarScrim);
         root = findViewById(R.id.root);
+        scroll = findViewById(R.id.scroll);
+        content = findViewById(R.id.content);
+        heroBlock = findViewById(R.id.heroBlock);
+        accountCard = findViewById(R.id.accountCard);
+        deviceCard = findViewById(R.id.deviceCard);
+        statsCard = findViewById(R.id.statsCard);
+        logCard = findViewById(R.id.logCard);
 
         setupWindow();
         manager.setListener(this);
@@ -127,6 +142,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
 
         btnSendCode.setOnClickListener(v -> {
+            tap(v);
             String p = phone.getText().toString().trim();
             if (p.length() != 11) {
                 toast("请输入 11 位手机号");
@@ -136,6 +152,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             manager.sendSms(p);
         });
         btnLogin.setOnClickListener(v -> {
+            tap(v);
             String p = phone.getText().toString().trim();
             String c = code.getText().toString().trim();
             if (p.length() != 11 || c.isEmpty()) {
@@ -145,13 +162,25 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             manager.savePhone(p);
             manager.login(p, c);
         });
-        btnScan.setOnClickListener(v -> manager.scan());
-        btnQuery.setOnClickListener(v -> manager.query());
+        btnScan.setOnClickListener(v -> {
+            tap(v);
+            btnScan.setText("扫描中…");
+            manager.scan();
+            btnScan.postDelayed(() -> {
+                if (!manager.isBusy()) btnScan.setText("扫描水表");
+            }, 16000);
+        });
+        btnQuery.setOnClickListener(v -> {
+            tap(v);
+            manager.query();
+        });
         btnWater.setOnClickListener(v -> {
+            tap(v);
             if (manager.isRunning()) manager.close("用户关水");
             else manager.open();
         });
         btnCopyLog.setOnClickListener(v -> {
+            tap(v);
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) {
                 cm.setPrimaryClip(ClipData.newPlainText("water-valve-log",
@@ -160,11 +189,17 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             }
         });
         btnToggleLogin.setOnClickListener(v -> {
+            tap(v);
+            TransitionManager.beginDelayedTransition((ViewGroup) accountCard,
+                    new AutoTransition().setDuration(220));
             boolean show = loginFields.getVisibility() != View.VISIBLE;
             loginFields.setVisibility(show ? View.VISIBLE : View.GONE);
             btnToggleLogin.setText(show ? "收起" : "切换账号");
         });
         btnToggleLog.setOnClickListener(v -> {
+            tap(v);
+            TransitionManager.beginDelayedTransition((ViewGroup) logCard,
+                    new AutoTransition().setDuration(220));
             logExpanded = !logExpanded;
             logBody.setVisibility(logExpanded ? View.VISIBLE : View.GONE);
             btnToggleLog.setText(logExpanded ? "收起" : "展开");
@@ -174,6 +209,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
         btnCheckUpdate.setOnClickListener(v -> {
+            tap(v);
             if (pendingUpdate != null) {
                 Updater.Info info = pendingUpdate;
                 pendingUpdate = null;
@@ -184,13 +220,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.4.4");
+        appendLog("安卓版启动，版本 0.5.0");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
-            int end = Math.min(1500, crash.length());
-            appendLog("上次崩溃日志：\n" + crash.substring(0, end));
+            appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
             CrashLog.clear(this);
         }
+        setupInteractions();
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
@@ -252,6 +288,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
             dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
         }
+        v.setAlpha(0f);
+        v.setScaleX(0.96f);
+        v.setScaleY(0.96f);
+        v.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(180)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
     }
 
     private void showUpdateDialog(Updater.Info info) {
@@ -295,6 +338,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
             dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
         }
+        v.setAlpha(0f);
+        v.setScaleX(0.96f);
+        v.setScaleY(0.96f);
+        v.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(180)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
     }
 
     private void downloadUpdate(Updater.Info info) {
@@ -455,6 +505,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void applySessionLayout(boolean logged) {
         if (btnToggleLogin == null) return;
+        if (accountCard != null) {
+            TransitionManager.beginDelayedTransition((ViewGroup) accountCard,
+                    new AutoTransition().setDuration(220));
+        }
         if (logged) {
             loginFields.setVisibility(View.GONE);
             btnToggleLogin.setVisibility(View.VISIBLE);
@@ -498,25 +552,52 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void updateHeader() {
         if (running) {
-            heroTitle.setText("放水中");
-            heroSub.setText(connected ? "正在出水 · 通知栏可关水" : "连接已断开，正在自动恢复…");
-            headerStatus.setText(connected ? "进行中" : "恢复中");
-            headerStatus.setTextColor(getColor(R.color.primary));
+            applyHero("放水中",
+                    connected ? "正在出水 · 通知栏可关水" : "连接已断开，正在自动恢复…",
+                    connected ? "进行中" : "恢复中", getColor(R.color.primary));
         } else if (connected) {
-            heroTitle.setText("已连接");
             String name = manager.getDeviceName();
             String mac = manager.getMac();
             String sub = (name == null || name.isEmpty()) ? "水表已连接" : name;
             if (mac != null && !mac.isEmpty()) sub += " · " + mac;
-            heroSub.setText(sub);
-            headerStatus.setText("在线");
-            headerStatus.setTextColor(getColor(R.color.success));
+            applyHero("已连接", sub, "在线", getColor(R.color.success));
         } else {
-            heroTitle.setText("未连接");
-            heroSub.setText("靠近水表，手机直接控制");
-            headerStatus.setText("离线");
-            headerStatus.setTextColor(getColor(R.color.muted));
+            applyHero("未连接", "靠近水表，手机直接控制", "离线", getColor(R.color.muted));
         }
+    }
+
+    private void applyHero(String title, String sub, String chip, int color) {
+        boolean changed = !title.equals(lastHeroTitle);
+        if (changed && !lastHeroTitle.isEmpty()) {
+            heroTitle.animate().cancel();
+            heroTitle.animate().alpha(0f).translationY(-dp(4)).setDuration(90)
+                    .withEndAction(() -> {
+                        heroTitle.setText(title);
+                        heroTitle.setTranslationY(dp(4));
+                        heroTitle.animate().alpha(1f).translationY(0)
+                                .setDuration(190)
+                                .setInterpolator(new DecelerateInterpolator())
+                                .start();
+                    }).start();
+        } else {
+            heroTitle.setText(title);
+        }
+        lastHeroTitle = title;
+        if (!sub.equals(heroSub.getText().toString())) {
+            heroSub.animate().cancel();
+            heroSub.animate().alpha(0f).setDuration(80)
+                    .withEndAction(() -> {
+                        heroSub.setText(sub);
+                        heroSub.animate().alpha(1f).setDuration(180).start();
+                    }).start();
+        }
+        headerStatus.setText(chip);
+        headerStatus.setTextColor(color);
+        headerStatus.animate().cancel();
+        headerStatus.setScaleX(0.94f);
+        headerStatus.setScaleY(0.94f);
+        headerStatus.animate().scaleX(1f).scaleY(1f).setDuration(200)
+                .setInterpolator(new DecelerateInterpolator()).start();
     }
 
     @Override
@@ -542,6 +623,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnQuery.setEnabled(!busy);
         btnWater.setEnabled(!busy);
         if (busy) {
+            if (label != null) {
+                if (label.contains("发送")) btnSendCode.setText("发送中…");
+                if (label.contains("登录")) btnLogin.setText("登录中…");
+                if (label.contains("连接")) btnScan.setText("连接中…");
+                if (label.contains("查询")) btnQuery.setText("查询中…");
+            }
             boolean waterOp = label != null
                     && (label.contains("开水") || label.contains("关") || label.contains("关水"));
             btnWater.setText(waterOp
@@ -550,6 +637,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             btnWater.setBackgroundResource(label != null && label.contains("关")
                     ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
         } else {
+            btnSendCode.setText("发码");
+            btnLogin.setText("登录");
+            btnScan.setText("扫描水表");
+            btnQuery.setText("查询状态");
             btnWater.setText(running ? "关水" : "开水");
             btnWater.setBackgroundResource(running
                     ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
@@ -562,6 +653,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnWater.setText(running ? "关水" : "开水");
         btnWater.setBackgroundResource(running
                 ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
+        btnWater.animate().cancel();
+        btnWater.setScaleX(1f);
+        btnWater.setScaleY(1f);
+        btnWater.animate().scaleX(1.015f).scaleY(1.015f).setDuration(110)
+                .withEndAction(() -> btnWater.animate()
+                        .scaleX(1f).scaleY(1f).setDuration(140).start())
+                .start();
         waterStatus.setText(running ? "正在出水 · 通知栏可关水"
                 : (connected ? "水表已连接" : "空闲"));
         waterStatus.setTextColor(getColor(running ? R.color.primary : R.color.muted));
@@ -581,7 +679,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onDevices(List<ValveManager.ScanItem> devices) {
         deviceList.removeAllViews();
-        for (ValveManager.ScanItem item : devices) {
+        for (int i = 0; i < devices.size(); i++) {
+            ValveManager.ScanItem item = devices.get(i);
             TextView tv = new TextView(this);
             String name = item.name == null || item.name.isEmpty() ? "未命名设备" : item.name;
             String addr;
@@ -602,8 +701,19 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                     LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.topMargin = dp(8);
             tv.setLayoutParams(lp);
-            tv.setOnClickListener(v -> manager.connect(item));
+            tv.setOnClickListener(v -> {
+                tap(v);
+                manager.connect(item);
+            });
+            tv.setAlpha(0f);
+            tv.setTranslationY(dp(8));
             deviceList.addView(tv);
+            tv.animate().alpha(1f).translationY(0f)
+                    .setStartDelay(i * 35L).setDuration(240)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }
+        if (!devices.isEmpty()) {
+            btnScan.setText("扫描水表");
         }
         if (devices.isEmpty()) {
             TextView tv = new TextView(this);
@@ -659,6 +769,61 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             updateProgress = null;
         }
         super.onDestroy();
+    }
+
+    private void setupInteractions() {
+        View[] press = {btnWater, btnScan, btnQuery, btnLogin, btnSendCode,
+                btnCopyLog, btnToggleLogin, btnToggleLog, btnCheckUpdate};
+        for (View v : press) pressScale(v);
+        scroll.setOnScrollChangeListener((v, sx, sy, oldX, oldY) -> {
+            float t = Math.min(1f, sy / (float) dp(140));
+            bottomBar.setElevation(dp(4) + t * dp(10));
+        });
+        animateIn();
+    }
+
+    private void animateIn() {
+        View[] items = {header, heroBlock, accountCard, deviceCard, statsCard, logCard};
+        for (int i = 0; i < items.length; i++) {
+            View v = items[i];
+            if (v == null) continue;
+            v.setAlpha(0f);
+            v.setTranslationY(dp(14));
+            v.animate().alpha(1f).translationY(0f)
+                    .setStartDelay(50L * i)
+                    .setDuration(340)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+        }
+        btnCheckUpdate.setAlpha(0f);
+        btnCheckUpdate.animate().alpha(1f).setDuration(300).setStartDelay(320).start();
+        bottomBar.setAlpha(0f);
+        bottomBar.setTranslationY(dp(18));
+        bottomBar.animate().alpha(1f).translationY(0f)
+                .setStartDelay(180).setDuration(320)
+                .setInterpolator(new DecelerateInterpolator()).start();
+    }
+
+    private void pressScale(View v) {
+        if (v == null) return;
+        v.setOnTouchListener((view, event) -> {
+            if (!view.isEnabled()) return false;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    view.animate().scaleX(0.97f).scaleY(0.97f)
+                            .setDuration(80).withLayer().start();
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(140).start();
+                    break;
+            }
+            return false;
+        });
+    }
+
+    private void tap(View v) {
+        if (v != null) v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
     }
 
     private int dp(int v) {
