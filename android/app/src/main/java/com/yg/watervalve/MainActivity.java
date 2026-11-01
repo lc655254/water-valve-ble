@@ -1,6 +1,9 @@
 package com.yg.watervalve;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -17,8 +20,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.transition.AutoTransition;
-import android.transition.TransitionManager;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -190,21 +191,18 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         btnToggleLogin.setOnClickListener(v -> {
             tap(v);
-            TransitionManager.beginDelayedTransition((ViewGroup) accountCard,
-                    new AutoTransition().setDuration(220));
             boolean show = loginFields.getVisibility() != View.VISIBLE;
-            loginFields.setVisibility(show ? View.VISIBLE : View.GONE);
+            animateVisibility(loginFields, show);
             btnToggleLogin.setText(show ? "收起" : "切换账号");
         });
         btnToggleLog.setOnClickListener(v -> {
             tap(v);
-            TransitionManager.beginDelayedTransition((ViewGroup) logCard,
-                    new AutoTransition().setDuration(220));
-            logExpanded = !logExpanded;
-            logBody.setVisibility(logExpanded ? View.VISIBLE : View.GONE);
-            btnToggleLog.setText(logExpanded ? "收起" : "展开");
-            if (logExpanded) {
-                logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+            boolean show = !logExpanded;
+            logExpanded = show;
+            animateVisibility(logBody, show);
+            btnToggleLog.setText(show ? "收起" : "展开");
+            if (show) {
+                logBody.postDelayed(() -> logScroll.fullScroll(View.FOCUS_DOWN), 260);
             }
         });
         btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
@@ -220,7 +218,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.5.0");
+        appendLog("安卓版启动，版本 0.5.1");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -505,10 +503,6 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void applySessionLayout(boolean logged) {
         if (btnToggleLogin == null) return;
-        if (accountCard != null) {
-            TransitionManager.beginDelayedTransition((ViewGroup) accountCard,
-                    new AutoTransition().setDuration(220));
-        }
         if (logged) {
             loginFields.setVisibility(View.GONE);
             btnToggleLogin.setVisibility(View.VISIBLE);
@@ -810,8 +804,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             if (!view.isEnabled()) return false;
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    view.animate().scaleX(0.97f).scaleY(0.97f)
-                            .setDuration(80).withLayer().start();
+                    view.animate().scaleX(0.975f).scaleY(0.975f)
+                            .setDuration(80).start();
                     break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
@@ -820,6 +814,55 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             }
             return false;
         });
+    }
+
+    private void animateVisibility(View v, boolean show) {
+        if (v == null) return;
+        ViewGroup.LayoutParams lp = v.getLayoutParams();
+        if (lp == null) return;
+        int parentWidth = v.getWidth();
+        if (parentWidth <= 0 && v.getParent() instanceof View) {
+            parentWidth = ((View) v.getParent()).getWidth();
+        }
+        v.measure(View.MeasureSpec.makeMeasureSpec(Math.max(0, parentWidth),
+                        View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int target = v.getMeasuredHeight();
+        int start = show ? 0 : v.getHeight();
+        if (show) {
+            v.setVisibility(View.VISIBLE);
+            v.setAlpha(0f);
+            lp.height = 0;
+            v.setLayoutParams(lp);
+        }
+        if ((show && target <= 0) || (!show && start <= 0)) {
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            v.setLayoutParams(lp);
+            v.setAlpha(1f);
+            v.setVisibility(show ? View.VISIBLE : View.GONE);
+            return;
+        }
+        int end = show ? target : 0;
+        ValueAnimator anim = ValueAnimator.ofInt(start, end);
+        anim.setDuration(220);
+        anim.setInterpolator(new DecelerateInterpolator());
+        anim.addUpdateListener(a -> {
+            int value = (int) a.getAnimatedValue();
+            lp.height = value;
+            v.setLayoutParams(lp);
+            float frac = show ? value / (float) target : value / (float) start;
+            v.setAlpha(Math.max(0f, Math.min(1f, frac)));
+        });
+        anim.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                v.setLayoutParams(lp);
+                v.setAlpha(1f);
+                if (!show) v.setVisibility(View.GONE);
+            }
+        });
+        anim.start();
     }
 
     private void tap(View v) {
