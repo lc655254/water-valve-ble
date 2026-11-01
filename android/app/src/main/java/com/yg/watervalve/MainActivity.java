@@ -39,17 +39,19 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity implements ValveManager.Listener {
     private ValveManager manager;
     private TextView sessionStatus, balance, deviceStatus, waterStatus, logView, headerStatus;
+    private TextView heroTitle, heroSub, btnToggleLogin, btnToggleLog;
     private TextView statLastMain, statLastSub, statTotalMain, statTotalSub;
     private EditText phone, code;
     private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater, btnCopyLog;
     private TextView btnCheckUpdate;
-    private LinearLayout deviceList, header, bottomBar;
+    private LinearLayout deviceList, header, bottomBar, loginFields, logBody;
     private ScrollView logScroll;
     private View statusBarScrim, root;
     private final StringBuilder logBuf = new StringBuilder();
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.CHINA);
     private boolean running;
     private boolean connected;
+    private boolean logExpanded;
     private ProgressDialog updateProgress;
 
     @Override
@@ -63,6 +65,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         deviceStatus = findViewById(R.id.deviceStatus);
         waterStatus = findViewById(R.id.waterStatus);
         headerStatus = findViewById(R.id.headerStatus);
+        heroTitle = findViewById(R.id.heroTitle);
+        heroSub = findViewById(R.id.heroSub);
+        btnToggleLogin = findViewById(R.id.btnToggleLogin);
+        btnToggleLog = findViewById(R.id.btnToggleLog);
+        loginFields = findViewById(R.id.loginFields);
+        logBody = findViewById(R.id.logBody);
         statLastMain = findViewById(R.id.statLastMain);
         statLastSub = findViewById(R.id.statLastSub);
         statTotalMain = findViewById(R.id.statTotalMain);
@@ -95,8 +103,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         renderStats(manager.getStatsText());
         btnWater.setText(running ? "关水" : "开水");
         btnWater.setBackgroundResource(running
-                ? R.drawable.bg_button_danger : R.drawable.bg_button_primary);
+                ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
         waterStatus.setText(running ? "正在放水" : (connected ? "水表已连接" : "状态未知"));
+        waterStatus.setTextColor(getColor(running ? R.color.primary : R.color.muted));
         updateHeader();
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -139,11 +148,24 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 toast("日志已复制");
             }
         });
+        btnToggleLogin.setOnClickListener(v -> {
+            boolean show = loginFields.getVisibility() != View.VISIBLE;
+            loginFields.setVisibility(show ? View.VISIBLE : View.GONE);
+            btnToggleLogin.setText(show ? "收起" : "切换账号");
+        });
+        btnToggleLog.setOnClickListener(v -> {
+            logExpanded = !logExpanded;
+            logBody.setVisibility(logExpanded ? View.VISIBLE : View.GONE);
+            btnToggleLog.setText(logExpanded ? "收起" : "展开");
+            if (logExpanded) {
+                logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+            }
+        });
         btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
         btnCheckUpdate.setOnClickListener(v -> checkUpdate(false));
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.3.0");
+        appendLog("安卓版启动，版本 0.4.0");
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
@@ -259,6 +281,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             w.getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                             | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
                             | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         }
 
@@ -320,16 +343,31 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void renderSession(Cloud.Session s) {
+        applySessionLayout(s != null);
         if (s == null) {
-            sessionStatus.setText("未登录（手机号 + 短信验证码）");
-            balance.setText("");
+            sessionStatus.setText("未登录");
+            balance.setText("手机号 + 短信验证码");
+            balance.setTextColor(getColor(R.color.muted));
             return;
         }
         String who = s.userName == null || s.userName.isEmpty()
                 || "null".equalsIgnoreCase(s.userName) ? s.telephone : s.userName;
-        sessionStatus.setText("已登录：" + who + " · 项目 " + s.projectId);
+        sessionStatus.setText(who);
         String bal = Cloud.fmtMoney(s.balance);
-        balance.setText(bal.isEmpty() ? "" : "¥" + bal);
+        balance.setText(bal.isEmpty() ? "" : "余额 ¥" + bal);
+        balance.setTextColor(getColor(R.color.primary));
+    }
+
+    private void applySessionLayout(boolean logged) {
+        if (btnToggleLogin == null) return;
+        if (logged) {
+            loginFields.setVisibility(View.GONE);
+            btnToggleLogin.setVisibility(View.VISIBLE);
+            btnToggleLogin.setText("切换账号");
+        } else {
+            loginFields.setVisibility(View.VISIBLE);
+            btnToggleLogin.setVisibility(View.GONE);
+        }
     }
 
     private void renderDevice() {
@@ -364,14 +402,26 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void updateHeader() {
-        if (running) setHeader("● 放水中", getColor(R.color.amber));
-        else if (connected) setHeader("● 已连接", getColor(R.color.green_light));
-        else setHeader("● 未连接", getColor(R.color.white_70));
-    }
-
-    private void setHeader(String text, int color) {
-        headerStatus.setText(text);
-        headerStatus.setTextColor(color);
+        if (running) {
+            heroTitle.setText("放水中");
+            heroSub.setText(connected ? "正在出水 · 通知栏可关水" : "连接已断开，正在自动恢复…");
+            headerStatus.setText(connected ? "进行中" : "恢复中");
+            headerStatus.setTextColor(getColor(R.color.primary));
+        } else if (connected) {
+            heroTitle.setText("已连接");
+            String name = manager.getDeviceName();
+            String mac = manager.getMac();
+            String sub = (name == null || name.isEmpty()) ? "水表已连接" : name;
+            if (mac != null && !mac.isEmpty()) sub += " · " + mac;
+            heroSub.setText(sub);
+            headerStatus.setText("在线");
+            headerStatus.setTextColor(getColor(R.color.success));
+        } else {
+            heroTitle.setText("未连接");
+            heroSub.setText("靠近水表，手机直接控制");
+            headerStatus.setText("离线");
+            headerStatus.setTextColor(getColor(R.color.muted));
+        }
     }
 
     @Override
@@ -397,12 +447,17 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnQuery.setEnabled(!busy);
         btnWater.setEnabled(!busy);
         if (busy) {
-            btnWater.setText(label == null || label.isEmpty() ? "处理中…" : label + "…");
-            btnWater.setBackgroundResource(R.drawable.bg_button_primary);
+            boolean waterOp = label != null
+                    && (label.contains("开水") || label.contains("关") || label.contains("关水"));
+            btnWater.setText(waterOp
+                    ? (label + "…")
+                    : (running ? "关水" : "开水"));
+            btnWater.setBackgroundResource(label != null && label.contains("关")
+                    ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
         } else {
             btnWater.setText(running ? "关水" : "开水");
             btnWater.setBackgroundResource(running
-                    ? R.drawable.bg_button_danger : R.drawable.bg_button_primary);
+                    ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
         }
     }
 
@@ -411,8 +466,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         this.running = running;
         btnWater.setText(running ? "关水" : "开水");
         btnWater.setBackgroundResource(running
-                ? R.drawable.bg_button_danger : R.drawable.bg_button_primary);
-        waterStatus.setText(running ? "正在放水 · 通知栏可关水" : (connected ? "水表已连接" : "空闲"));
+                ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
+        waterStatus.setText(running ? "正在出水 · 通知栏可关水"
+                : (connected ? "水表已连接" : "空闲"));
+        waterStatus.setTextColor(getColor(running ? R.color.primary : R.color.muted));
         updateHeader();
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -438,7 +495,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             } catch (SecurityException e) {
                 addr = "";
             }
-            tv.setText(name + "\n" + addr + "  " + item.rssi + " dBm  ·  点此连接");
+            tv.setText(name + "\n" + addr + "   " + item.rssi + " dBm");
             tv.setTextSize(13);
             tv.setTextColor(getColor(R.color.ink));
             tv.setLineSpacing(dp(3), 1f);
@@ -466,7 +523,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onQuery(Protocol.Query q) {
         connected = true;
-        waterStatus.setText("设备：" + q.statusText() + " · onCharge=" + q.onCharge);
+        waterStatus.setText(q.statusText());
+        waterStatus.setTextColor(getColor("00".equals(q.onCharge)
+                ? R.color.success : R.color.primary));
         updateHeader();
         renderDevice();
     }
@@ -479,7 +538,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onConnection(boolean connected) {
         this.connected = connected;
-        if (!connected && !running) waterStatus.setText("未连接水表");
+        if (!connected && !running) {
+            waterStatus.setText("未连接水表");
+            waterStatus.setTextColor(getColor(R.color.muted));
+        }
         updateHeader();
     }
 
@@ -518,11 +580,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             w.setDecorFitsSystemWindows(false);
             WindowInsetsController c = w.getInsetsController();
             if (c != null) {
-                c.setSystemBarsAppearance(
-                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
-                c.setSystemBarsAppearance(0,
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+                int light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                c.setSystemBarsAppearance(light, light);
             }
         }
 
