@@ -12,9 +12,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
@@ -54,9 +56,12 @@ public final class ValveManager {
     private final SharedPreferences prefs;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService nameIo = Executors.newSingleThreadExecutor();
     private final BleClient ble;
     private final BluetoothAdapter adapter;
     private final List<ScanItem> devices = new ArrayList<>();
+    private final Set<String> cloudLooked = new HashSet<>();
+    private static final String GENERIC_NAME = "KLCXKJ 水表";
     private Listener listener;
     private Cloud.Session session;
     private volatile boolean running;
@@ -160,6 +165,7 @@ public final class ValveManager {
                         + " · 项目 " + s.projectId
                         + (s.balance.isEmpty() ? "" : " · 余额 " + Cloud.fmtMoney(s.balance) + " 元"));
                 notifySession();
+                lookupExistingDevices();
             } catch (Exception e) {
                 log("登录失败：" + msg(e));
             } finally {
@@ -170,11 +176,11 @@ public final class ValveManager {
 
     public void scan() {
         if (busy) return;
-        io.execute(() -> {
+        main.post(() -> {
             devices.clear();
             notifyDevices();
-            ble.startScan();
         });
+        io.execute(() -> ble.startScan());
     }
 
     public void connect(ScanItem item) {
@@ -303,6 +309,7 @@ public final class ValveManager {
         log("设备状态：" + q.statusText() + " · deviceId=" + q.deviceIdInt()
                 + " · 项目=" + q.projectInt() + " · MAC=" + mac
                 + " · random=" + q.tacTimes);
+        lookupCloudDevice();
     }
 
     private void openInternal() throws Exception {
@@ -684,6 +691,108 @@ public final class ValveManager {
         return Math.round(v * 10000.0) / 10000.0;
     }
 
+    private void lookupExistingDevices() {
+        main.post(() -> {
+            final List<String> addrs = new ArrayList<>();
+            for (ScanItem it : devices) {
+                String a = addressOf(it.device);
+                if (!a.isEmpty()) addrs.add(a);
+            }
+            if (addrs.isEmpty()) return;
+            nameIo.execute(() -> {
+                for (String a : addrs) lookupCloudFor(a);
+            });
+        });
+    }
+
+    private void lookupCloudDevice() {
+        String addr = bleAddr;
+        if (addr == null || addr.isEmpty()) {
+            addr = addressOf(ble.getDevice());
+        }
+        if (addr == null || addr.isEmpty()) return;
+        final String a = addr;
+        nameIo.execute(() -> lookupCloudFor(a));
+    }
+
+    private void lookupCloudFor(String addr) {
+        if (session == null || addr == null || addr.isEmpty()) return;
+        try {
+            Cloud.DeviceInfo info = Cloud.queryDevice(session, addr);
+            if (info == null && addr != null && addr.equalsIgnoreCase(bleAddr)
+                    && mac != null && !mac.isEmpty() && !mac.equalsIgnoreCase(addr)) {
+                info = Cloud.queryDevice(session, mac);
+            }
+            if (info == null || info.deviceName == null || info.deviceName.isEmpty()) return;
+            final String name = info.deviceName.trim();
+            if (name.isEmpty()) return;
+            rememberCloudName(addr, name);
+            main.post(() -> {
+                updateListName(addr, name);
+                if (addr.equalsIgnoreCase(bleAddr)) {
+                    deviceName = name;
+                    saveDevice();
+                    if (listener != null) listener.onConnection(ble.isReady());
+                    log("设备名称：" + name);
+                }
+                notifyDevices();
+            });
+        } catch (Exception ignored) {
+        }
+    }
+
+    private String knownCloud(String addr) {
+        if (addr == null || addr.isEmpty()) return "";
+        return prefs.getString("cloudname:" + addr.toLowerCase(Locale.ROOT), "");
+    }
+
+    private String knownName(String addr) {
+        String cloud = knownCloud(addr);
+        if (!cloud.isEmpty()) return cloud;
+        if (addr != null && addr.equalsIgnoreCase(bleAddr)
+                && deviceName != null && !deviceName.isEmpty()) {
+            return deviceName;
+        }
+        if (addr == null || addr.isEmpty()) return "";
+        return prefs.getString("devname:" + addr.toLowerCase(Locale.ROOT), "");
+    }
+
+    private void rememberName(String addr, String name) {
+        if (addr == null || addr.isEmpty() || name == null || name.isEmpty()) return;
+        prefs.edit().putString("devname:" + addr.toLowerCase(Locale.ROOT), name).apply();
+    }
+
+    private void rememberCloudName(String addr, String name) {
+        if (addr == null || addr.isEmpty() || name == null || name.isEmpty()) return;
+        prefs.edit().putString("cloudname:" + addr.toLowerCase(Locale.ROOT), name).apply();
+    }
+
+    private void updateListName(String addr, String name) {
+        if (addr == null || addr.isEmpty() || name == null || name.isEmpty()) return;
+        boolean changed = false;
+        for (int i = 0; i < devices.size(); i++) {
+            ScanItem it = devices.get(i);
+            if (addr.equalsIgnoreCase(addressOf(it.device))) {
+                if (!name.equals(it.name)) {
+                    devices.set(i, new ScanItem(it.device, name, it.rssi));
+                    changed = true;
+                }
+                break;
+            }
+        }
+        if (changed) notifyDevices();
+    }
+
+    private static String addressOf(BluetoothDevice d) {
+        if (d == null) return "";
+        try {
+            String a = d.getAddress();
+            return a == null ? "" : a;
+        } catch (SecurityException e) {
+            return "";
+        }
+    }
+
     private void saveSafety() {
         boolean ok = prefs.edit()
                 .putBoolean("safety_open", safetyOpen)
@@ -845,8 +954,40 @@ public final class ValveManager {
         @Override
         public void onScan(BluetoothDevice device, String name, int rssi) {
             main.post(() -> {
-                devices.add(new ScanItem(device, name, rssi));
-                notifyDevices();
+                String addr = addressOf(device);
+                String actual = name == null ? "" : name.trim();
+                if (!actual.isEmpty()) rememberName(addr, actual);
+                String cloud = knownCloud(addr);
+                String nm;
+                if (!cloud.isEmpty()) nm = cloud;
+                else if (!actual.isEmpty()) nm = actual;
+                else nm = knownName(addr);
+                if (nm == null || nm.isEmpty()) nm = GENERIC_NAME;
+                int idx = -1;
+                for (int i = 0; i < devices.size(); i++) {
+                    if (addr.equalsIgnoreCase(addressOf(devices.get(i).device))) {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx >= 0) {
+                    ScanItem old = devices.get(idx);
+                    if (GENERIC_NAME.equals(nm) && old.name != null
+                            && !old.name.isEmpty() && !GENERIC_NAME.equals(old.name)) {
+                        nm = old.name;
+                    }
+                    boolean changed = old.name == null || !old.name.equals(nm);
+                    devices.set(idx, new ScanItem(device, nm, rssi));
+                    if (changed) notifyDevices();
+                } else {
+                    devices.add(new ScanItem(device, nm, rssi));
+                    notifyDevices();
+                }
+                if (session != null && !addr.isEmpty() && !cloudLooked.contains(addr)) {
+                    cloudLooked.add(addr);
+                    final String a = addr;
+                    nameIo.execute(() -> lookupCloudFor(a));
+                }
             });
         }
 
@@ -864,22 +1005,51 @@ public final class ValveManager {
         }
 
         @Override
+        public void onDeviceName(String name) {
+            if (name == null || name.trim().isEmpty()) return;
+            String n = name.trim();
+            String addr = addressOf(ble.getDevice());
+            if (addr.isEmpty()) addr = bleAddr;
+            if (addr.isEmpty()) return;
+            bleAddr = addr;
+            if (!knownCloud(addr).isEmpty()) return;
+            if (n.equals(deviceName)) return;
+            deviceName = n;
+            rememberName(addr, n);
+            saveDevice();
+            final String a = addr;
+            main.post(() -> {
+                updateListName(a, n);
+                if (listener != null) listener.onConnection(ble.isReady());
+                notifyDevices();
+            });
+            log("设备名称：" + n);
+        }
+
+        @Override
         public void onReady() {
             stopReconnect();
             main.post(() -> {
                 log("水表已连接");
                 setBusy(false, "");
                 if (ble.getDevice() != null) {
-                    deviceName = ble.getSelectedName();
-                    try {
-                        bleAddr = ble.getDevice().getAddress();
-                        if (mac == null || mac.isEmpty()) mac = bleAddr;
-                    } catch (SecurityException ignored) {
+                    String addr = addressOf(ble.getDevice());
+                    if (!addr.isEmpty()) bleAddr = addr;
+                    String cloud = knownCloud(bleAddr);
+                    String n = ble.getSelectedName();
+                    if (!cloud.isEmpty()) {
+                        deviceName = cloud;
+                    } else if (n != null && !n.isEmpty()) {
+                        deviceName = n;
+                    } else {
+                        String cached = knownName(bleAddr);
+                        if (!cached.isEmpty()) deviceName = cached;
                     }
+                    if (mac == null || mac.isEmpty()) mac = bleAddr;
                     saveDevice();
                 }
+                notifyConnection(true);
             });
-            notifyConnection(true);
             if (recovering || hasOpenSession()) {
                 recovering = true;
                 attemptRecoveryClose();

@@ -218,7 +218,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.5.1");
+        appendLog("安卓版启动，版本 0.5.2");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -676,7 +676,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         for (int i = 0; i < devices.size(); i++) {
             ValveManager.ScanItem item = devices.get(i);
             TextView tv = new TextView(this);
-            String name = item.name == null || item.name.isEmpty() ? "未命名设备" : item.name;
+            String name = item.name == null || item.name.isEmpty()
+                    ? "KLCXKJ 水表" : item.name;
             String addr;
             try {
                 addr = item.device.getAddress();
@@ -741,6 +742,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             waterStatus.setText("未连接水表");
             waterStatus.setTextColor(getColor(R.color.muted));
         }
+        renderDevice();
         updateHeader();
     }
 

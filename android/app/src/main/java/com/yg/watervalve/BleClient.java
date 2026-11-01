@@ -18,14 +18,15 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
+import android.os.SystemClock;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeoutException;
@@ -37,6 +38,7 @@ public final class BleClient {
         void onScan(BluetoothDevice device, String name, int rssi);
         void onConnected(boolean ok, String msg);
         void onReady();
+        void onDeviceName(String name);
         void onDisconnected(String msg);
     }
 
@@ -56,7 +58,9 @@ public final class BleClient {
     private BluetoothGattCharacteristic notifyChar;
     private final StringBuilder rx = new StringBuilder();
     private final LinkedBlockingQueue<Protocol.Frame> frames = new LinkedBlockingQueue<>();
-    private final Set<String> seen = new HashSet<>();
+    private final Map<String, String> lastNames = new HashMap<>();
+    private final Map<String, Long> lastEmit = new HashMap<>();
+    private BluetoothGattCharacteristic nameChar;
     private volatile boolean ready;
     private volatile boolean scanning;
     private String selectedName = "";
@@ -86,9 +90,9 @@ public final class BleClient {
                 listener.onLog("无法获取 BLE 扫描器");
                 return;
             }
-            seen.clear();
-            scanning = true;
-            ScanSettings settings = new ScanSettings.Builder()
+            lastNames.clear();
+            lastEmit.clear();
+            scanning = true;            ScanSettings settings = new ScanSettings.Builder()
                     .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                     .build();
             scanner.startScan(null, settings, scanCallback);
@@ -130,7 +134,14 @@ public final class BleClient {
                     || name.toUpperCase(Locale.ROOT).contains("QZXY")
                     || hasService(rec, "fee7") || hasService(rec, "ff00");
             if (!match) return;
-            if (!seen.add(d.getAddress())) return;
+            String addr = d.getAddress();
+            String prev = lastNames.get(addr);
+            boolean nameChanged = !name.isEmpty() && !name.equals(prev);
+            long now = SystemClock.elapsedRealtime();
+            Long last = lastEmit.get(addr);
+            if (!nameChanged && last != null && now - last < 800) return;
+            lastEmit.put(addr, now);
+            if (!name.isEmpty()) lastNames.put(addr, name);
             selectedName = name;
             listener.onScan(d, name, result.getRssi());
         }
@@ -213,12 +224,14 @@ public final class BleClient {
             }
             writeChar = null;
             notifyChar = null;
+            nameChar = null;
             try {
                 for (BluetoothGattService svc : g.getServices()) {
                     for (BluetoothGattCharacteristic ch : svc.getCharacteristics()) {
                         String u = ch.getUuid().toString().toLowerCase(Locale.ROOT);
                         if (u.equals(Protocol.WRITE_UUID)) writeChar = ch;
                         if (u.equals(Protocol.NOTIFY_UUID)) notifyChar = ch;
+                        if (u.equals("00002a00-0000-1000-8000-00805f9b34fb")) nameChar = ch;
                     }
                 }
             } catch (SecurityException e) {
@@ -263,6 +276,21 @@ public final class BleClient {
         }
 
         @Override
+        public void onCharacteristicRead(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
+            if (!"00002a00-0000-1000-8000-00805f9b34fb"
+                    .equalsIgnoreCase(ch.getUuid().toString())) return;
+            handleDeviceName(ch.getValue(), status);
+        }
+
+        @Override
+        public void onCharacteristicRead(BluetoothGatt g, BluetoothGattCharacteristic ch,
+                                         byte[] value, int status) {
+            if (!"00002a00-0000-1000-8000-00805f9b34fb"
+                    .equalsIgnoreCase(ch.getUuid().toString())) return;
+            handleDeviceName(value, status);
+        }
+
+        @Override
         public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic ch) {
             byte[] v = ch.getValue();
             if (v == null || v.length == 0) return;
@@ -275,8 +303,32 @@ public final class BleClient {
         ready = true;
         if (connectTimeout != null) main.removeCallbacks(connectTimeout);
         connectTimeout = null;
+        String n = safeName(device);
+        if (!n.isEmpty()) {
+            selectedName = n;
+            listener.onDeviceName(n);
+        }
         listener.onConnected(true, "水表已连接");
         listener.onReady();
+        main.postDelayed(this::readDeviceName, 250);
+    }
+
+    private void readDeviceName() {
+        if (gatt == null || nameChar == null) return;
+        if ((nameChar.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) == 0) return;
+        try {
+            gatt.readCharacteristic(nameChar);
+        } catch (SecurityException ignored) {
+        }
+    }
+
+    private void handleDeviceName(byte[] value, int status) {
+        if (status != BluetoothGatt.GATT_SUCCESS || value == null || value.length == 0) return;
+        String n = new String(value, StandardCharsets.UTF_8).trim();
+        if (!n.isEmpty()) {
+            selectedName = n;
+            listener.onDeviceName(n);
+        }
     }
 
     private void parseAvailable() {
@@ -361,6 +413,7 @@ public final class BleClient {
         gatt = null;
         writeChar = null;
         notifyChar = null;
+        nameChar = null;
         rx.setLength(0);
         frames.clear();
     }

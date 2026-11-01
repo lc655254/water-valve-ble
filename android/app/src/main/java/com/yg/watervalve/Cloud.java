@@ -1,5 +1,6 @@
 package com.yg.watervalve;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -125,6 +126,29 @@ public final class Cloud {
             if (!m.isEmpty()) return m;
         }
         return null;
+    }
+
+    public static DeviceInfo queryDevice(Session s, String mac) throws Exception {
+        if (s == null || mac == null || mac.trim().isEmpty()) return null;
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("projectId", s.projectId);
+        p.put("isNew", "1");
+        p.put("macAddressList", mac.trim());
+        p.put("loginCode", s.loginCode);
+        p.put("userId", s.userId);
+        p.put("accountId", s.accountId);
+        JSONObject d = get("/device/list/mac", p);
+        if (d.optInt("errorCode", -1) != 0) return null;
+        JSONArray arr = d.optJSONArray("data");
+        if (arr == null || arr.length() == 0) return null;
+        JSONObject o = arr.optJSONObject(0);
+        if (o == null) return null;
+        DeviceInfo di = new DeviceInfo();
+        di.deviceName = safeString(o, "deviceName");
+        di.deviceId = safeString(o, "deviceId");
+        di.snCode = safeString(o, "snCode");
+        di.online = o.optBoolean("isOnline", false);
+        return di;
     }
 
     public static RateOrder rateOrder(Session s, int deviceId, String randomNumber,
@@ -260,6 +284,13 @@ public final class Cloud {
         public String downData = "";
         public int rate;
         public String raw = "";
+    }
+
+    public static final class DeviceInfo {
+        public String deviceName = "";
+        public String deviceId = "";
+        public String snCode = "";
+        public boolean online;
     }
 
     public static final class Session {
