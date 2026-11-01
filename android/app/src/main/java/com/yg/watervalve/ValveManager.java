@@ -804,35 +804,83 @@ public final class ValveManager {
     private void lookupCloudFor(String addr) {
         if (session == null || addr == null || addr.isEmpty()) return;
         try {
-            Cloud.DeviceInfo info = Cloud.queryDevice(session, addr);
-            if ((info == null || !info.found) && addr.equalsIgnoreCase(bleAddr)
-                    && mac != null && !mac.isEmpty() && !mac.equalsIgnoreCase(addr)) {
-                Cloud.DeviceInfo alt = Cloud.queryDevice(session, mac);
-                if (alt != null && alt.found) info = alt;
+            Cloud.DeviceInfo found = null;
+            boolean hadResponse = false;
+            for (String cand : macCandidates(addr)) {
+                Cloud.DeviceInfo info = Cloud.queryDevice(session, cand);
+                if (info == null) continue;
+                hadResponse = true;
+                if (info.found) {
+                    found = info;
+                    break;
+                }
             }
-            if (info == null) return;
-            if (!info.found || info.deviceName == null || info.deviceName.isEmpty()) {
-                if (knownCloud(addr).isEmpty()) {
+            if (found == null) {
+                if (hadResponse && knownCloud(addr).isEmpty()) {
                     main.post(() -> markUnbound(addr));
                 }
                 return;
             }
-            final String name = info.deviceName.trim();
-            if (name.isEmpty()) return;
-            rememberCloudName(addr, name);
+            String name = found.deviceName == null ? "" : found.deviceName.trim();
+            if (name.isEmpty()) {
+                name = (found.buildingName + found.floorName + found.roomName).trim();
+            }
+            if (name.isEmpty()) {
+                if (knownCloud(addr).isEmpty()) main.post(() -> markUnbound(addr));
+                return;
+            }
+            final String finalName = name;
+            rememberCloudName(addr, finalName);
             main.post(() -> {
                 cloudChecked.add(addr);
-                updateListName(addr, name, true, true);
-                if (addr.equalsIgnoreCase(bleAddr)) {
-                    deviceName = name;
+                updateOfficialName(addr, finalName);
+                if (isMine(addr)) {
+                    deviceName = finalName;
                     saveDevice();
                     if (listener != null) listener.onConnection(ble.isReady());
-                    log("设备名称：" + name);
+                    log("设备名称：" + finalName);
                 }
                 notifyDevices();
             });
         } catch (Exception ignored) {
         }
+    }
+
+    private boolean isMine(String addr) {
+        if (addr == null || addr.isEmpty()) return false;
+        if (bleAddr != null && addr.equalsIgnoreCase(bleAddr)) return true;
+        if (lastDevice != null) {
+            String a = addressOf(lastDevice);
+            if (addr.equalsIgnoreCase(a)) return true;
+        }
+        return false;
+    }
+
+    private List<String> macCandidates(String addr) {
+        List<String> out = new ArrayList<>();
+        if (addr == null) return out;
+        String m = addr.toUpperCase(Locale.ROOT).replace("-", ":").trim();
+        if (m.isEmpty()) return out;
+        if (m.equalsIgnoreCase(bleAddr) && mac != null && !mac.isEmpty()
+                && !mac.equalsIgnoreCase(m)) {
+            out.add(mac.toUpperCase(Locale.ROOT));
+        }
+        out.add(m);
+        String[] parts = m.split(":");
+        if (parts.length == 6) {
+            try {
+                int b0 = Integer.parseInt(parts[0], 16);
+                String[] cands = {String.format(Locale.ROOT, "%02X", b0 & 0x3F),
+                        "00", "C0", "02"};
+                for (String c : cands) {
+                    String cand = c + ":" + parts[1] + ":" + parts[2] + ":"
+                            + parts[3] + ":" + parts[4] + ":" + parts[5];
+                    if (!out.contains(cand)) out.add(cand);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return out;
     }
 
     private void markUnbound(String addr) {
@@ -844,7 +892,7 @@ public final class ValveManager {
             if (addr.equalsIgnoreCase(addressOf(it.device))) {
                 if (it.bound || !it.cloudChecked) {
                     devices.set(i, new ScanItem(it.device, it.name, it.rssi,
-                            false, true, it.official));
+                            it.bound, true, it.official));
                     changed = true;
                 }
                 break;
@@ -1132,13 +1180,11 @@ public final class ValveManager {
                 String actual = name == null ? "" : name.trim();
                 if (!actual.isEmpty()) rememberName(addr, actual);
                 String cloud = knownCloud(addr);
-                String official = knownOfficial(addr);
-                boolean bound = !cloud.isEmpty();
-                boolean checked = bound || cloudChecked.contains(addr);
-                boolean isOfficial = !official.isEmpty();
+                boolean bound = isMine(addr);
+                boolean checked = cloudChecked.contains(addr);
+                boolean isOfficial = !cloud.isEmpty();
                 String nm;
                 if (!cloud.isEmpty()) nm = cloud;
-                else if (!official.isEmpty()) nm = official;
                 else if (!actual.isEmpty()) nm = actual;
                 else nm = knownName(addr);
                 if (nm == null || nm.isEmpty()) nm = GENERIC_NAME;
@@ -1168,12 +1214,6 @@ public final class ValveManager {
                     devices.add(new ScanItem(device, nm, rssi, bound, checked, isOfficial));
                     sortDevices();
                     notifyDevices();
-                }
-                if (Xiaolian.hasToken(context) && !addr.isEmpty()
-                        && !isOfficial && !officialLooked.contains(addr)) {
-                    officialLooked.add(addr);
-                    final String a = addr;
-                    nameIo.execute(() -> lookupOfficialFor(a));
                 }
                 if (session != null && !addr.isEmpty() && !cloudLooked.contains(addr)) {
                     cloudLooked.add(addr);
