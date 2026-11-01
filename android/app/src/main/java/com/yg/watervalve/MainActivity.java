@@ -22,7 +22,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -57,6 +56,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private boolean connected;
     private boolean logExpanded;
     private ProgressDialog updateProgress;
+    private Updater.Info pendingUpdate;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -115,8 +115,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
         if (manager.hasOpenSession() && !manager.isConnected()) {
-            ValveService.startRecover(this);
-            manager.recoverIfOpen(false);
+            try {
+                ValveService.startRecover(this);
+            } catch (Exception ignored) {
+            }
+            try {
+                manager.recoverIfOpen(false);
+            } catch (Exception ignored) {
+            }
         }
 
         btnSendCode.setOnClickListener(v -> {
@@ -166,22 +172,38 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             }
         });
         btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
-        btnCheckUpdate.setOnClickListener(v -> checkUpdate(false));
+        btnCheckUpdate.setOnClickListener(v -> {
+            if (pendingUpdate != null) {
+                Updater.Info info = pendingUpdate;
+                pendingUpdate = null;
+                showUpdateDialog(info);
+            } else {
+                checkUpdate(false);
+            }
+        });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.4.2");
+        appendLog("安卓版启动，版本 0.4.3");
+        String crash = CrashLog.last(this);
+        if (!crash.isEmpty()) {
+            int end = Math.min(1500, crash.length());
+            appendLog("上次崩溃日志：\n" + crash.substring(0, end));
+            CrashLog.clear(this);
+        }
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
     }
 
     private void checkUpdate(boolean silent) {
+        if (isFinishing() || isDestroyed()) return;
         if (manager.isRunning() || manager.hasOpenSession()) {
             if (!silent) toast("放水中，先关水再检查更新");
             return;
         }
         btnCheckUpdate.setText("检查中…");
         Updater.check(this, (info, error) -> {
+            if (isFinishing() || isDestroyed()) return;
             btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
             if (error != null) {
                 if (!silent) toast("检查更新失败：" + error);
@@ -191,11 +213,17 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 if (!silent) showLatestDialog();
                 return;
             }
+            if (silent) {
+                pendingUpdate = info;
+                btnCheckUpdate.setText("发现 v" + info.version + " · 点此更新");
+                return;
+            }
             showUpdateDialog(info);
         });
     }
 
     private void showLatestDialog() {
+        if (isFinishing() || isDestroyed()) return;
         View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
         TextView version = v.findViewById(R.id.dialogVersion);
         TextView meta = v.findViewById(R.id.dialogMeta);
@@ -226,6 +254,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void showUpdateDialog(Updater.Info info) {
+        if (isFinishing() || isDestroyed()) return;
         if (manager.isRunning() || manager.hasOpenSession()) {
             toast("放水中，先关水再更新");
             return;
@@ -268,6 +297,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void downloadUpdate(Updater.Info info) {
+        if (isFinishing() || isDestroyed()) return;
         if (manager.isRunning() || manager.hasOpenSession()) {
             toast("放水中，先关水再下载更新");
             return;
@@ -301,6 +331,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                         updateProgress.dismiss();
                         updateProgress = null;
                     }
+                    if (isFinishing() || isDestroyed()) return;
                     if (error != null) {
                         new AlertDialog.Builder(this)
                                 .setTitle("更新下载失败")
@@ -325,6 +356,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void installUpdate(File file) {
+        if (isFinishing() || isDestroyed()) return;
         if (manager.isRunning() || manager.hasOpenSession()) {
             toast("放水中，先关水再安装更新");
             return;
@@ -348,28 +380,17 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         Window w = getWindow();
         w.setStatusBarColor(Color.TRANSPARENT);
         w.setNavigationBarColor(getColor(R.color.bg));
-        if (Build.VERSION.SDK_INT >= 30) {
-            Api30.setup(w);
-        } else {
-            w.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                            | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-        }
+        w.getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
 
         final int headerTop = header.getPaddingTop();
         final int bottomPad = bottomBar.getPaddingBottom();
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top;
-            int bottom;
-            if (Build.VERSION.SDK_INT >= 30) {
-                top = Api30.top(insets);
-                bottom = Api30.bottom(insets);
-            } else {
-                top = insets.getSystemWindowInsetTop();
-                bottom = insets.getSystemWindowInsetBottom();
-            }
+            int top = insets.getSystemWindowInsetTop();
+            int bottom = insets.getSystemWindowInsetBottom();
             ViewGroup.LayoutParams lp = statusBarScrim.getLayoutParams();
             if (lp.height != top) {
                 lp.height = top;
@@ -645,26 +666,5 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void toast(String msg) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-    }
-
-    /** API 30+ 才加载，避免旧系统解析新类。 */
-    private static final class Api30 {
-        static void setup(Window w) {
-            w.setDecorFitsSystemWindows(false);
-            WindowInsetsController c = w.getInsetsController();
-            if (c != null) {
-                int light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                c.setSystemBarsAppearance(light, light);
-            }
-        }
-
-        static int top(WindowInsets i) {
-            return i.getInsets(WindowInsets.Type.systemBars()).top;
-        }
-
-        static int bottom(WindowInsets i) {
-            return i.getInsets(WindowInsets.Type.systemBars()).bottom;
-        }
     }
 }
