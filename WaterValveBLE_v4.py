@@ -52,6 +52,7 @@ DEBUG = (os.environ.get("WV_DEBUG", "").strip().lower() in ("1", "true", "yes", 
 # 只有在明确要看真实账单时，才设 WV_ALLOW_REAL_BILL=1 放行真实用量上报。
 ALLOW_REAL_BILL = (os.environ.get("WV_ALLOW_REAL_BILL", "0").strip().lower()
                    in ("1", "true", "yes", "on"))
+LAST_CLOSE_RESULT = {}   # 最近一次 85 采集/结算结果（含解析后的 flow），供账本兜底
 
 # ---------------- Windows 控制台（UTF-8 + ANSI 颜色） ----------------
 if sys.platform == "win32":
@@ -2367,7 +2368,10 @@ async def ble_settle(valve, s, random_number="", comm_mode="", tag="2] 关阀",
         zero_usage = True
     res = {"ok": False, "ended": False, "collect": None, "upload": False,
            "clear_by": None, "onCharge": None, "ts": time.time(),
-           "offline": offline, "zero_usage": zero_usage}
+           "offline": offline, "zero_usage": zero_usage,
+           "flow": None, "collect_full": None}
+    global LAST_CLOSE_RESULT
+    LAST_CLOSE_RESULT = res
     # 进入结算先落待办：中途掉线 / 被杀进程，下次启动也能接着零用量收拾
     pending_mark(kind="settle", tag=tag, zero_usage=zero_usage, offline=offline)
     print("  " + "-" * 56)
@@ -2408,6 +2412,8 @@ async def ble_settle(valve, s, random_number="", comm_mode="", tag="2] 关阀",
             collect_full = collect_raw
             collect = collect_raw[2:] if collect_raw.startswith("80") else collect_raw
             prof = parse_flow(collect_full)
+            res["flow"] = prof
+            res["collect_full"] = collect_full
             print(f"  {C.ok('[OK]')} 85 采集成功（完整 {len(collect_full)//2}B / "
                   f"清账用 {len(collect)//2}B，型号 {flow_model_tag(prof)}）")
             print(f"      {flow_brief(prof)}")
@@ -2572,7 +2578,9 @@ async def ble_reclear(valve, s, zero_usage=True):
     print(f"  {C.bold('[D] 补清账')}  85 采集 → 云端上传 → 86 清账 → 23 确认（不发 22）")
     res = {"ok": False, "collect": None, "upload": False, "clear_by": None,
            "onCharge": None, "ts": time.time(), "reclear": True,
-           "zero_usage": zero_usage}
+           "zero_usage": zero_usage, "flow": None, "collect_full": None}
+    global LAST_CLOSE_RESULT
+    LAST_CLOSE_RESULT = res
     pending_mark(kind="reclear", zero_usage=zero_usage)
 
     # ---------- 1) 查询状态：拿到 onCharge / 订单参数 ----------
@@ -2600,6 +2608,8 @@ async def ble_reclear(valve, s, zero_usage=True):
             collect_full = norm_hex(da)
             collect = collect_full[2:] if collect_full.startswith("80") else collect_full
             prof = parse_flow(collect_full)
+            res["flow"] = prof
+            res["collect_full"] = collect_full
             print(f"  {C.ok('[OK]')} 85 采集成功（完整 {len(collect_full) // 2}B / "
                   f"清账用 {len(collect) // 2}B，型号 {flow_model_tag(prof)}）")
             print(f"      {flow_brief(prof)}")

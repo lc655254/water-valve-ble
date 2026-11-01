@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ctypes
+import json
 import os
 import sys
 import time
@@ -93,7 +94,62 @@ def _release(d):
         pass
 
 
-def _close_once(loop, st, log):
+def _ledger_add(d, st, res, why, log):
+    """看门狗关阀后补一笔省钱账本（主程序已死，只能由看门狗写）。"""
+    try:
+        flow = (res or {}).get("flow") or {}
+        start = float(st.get("opened_ts") or st.get("started_ts") or time.time())
+        end = time.time()
+        seconds = int(max(0, end - start))
+        if flow.get("ok"):
+            count = flow.get("useCount_i")
+            if count is None:
+                return
+            rate = flow.get("rate2_i") or flow.get("rate1_i") or 25
+            use_l = round(max(0.0, count * 0.5), 3)
+            basis = "看门狗关阀，按 0.5 升/计数折算"
+        elif st.get("state") == "open":
+            count = None
+            rate = 25
+            use_l = round(max(0.0, seconds / 60.0 * 12.0), 3)
+            basis = "看门狗关阀，按 12 L/min 估算"
+        else:
+            return
+        by_use = round(max(0.0, float(use_l) * float(rate) / 1000.0), 4)
+        charge = round(max(by_use, 0.025), 4)
+        rec = {"ts": end, "start": start, "seconds": seconds,
+               "count": count, "cloud_use_count": None,
+               "liters": use_l, "basis": basis,
+               "rate_per_ton": int(rate), "by_use_yuan": by_use,
+               "min_charge": 0.025, "official_yuan": charge,
+               "paid_yuan": 0.0, "saved_yuan": charge,
+               "estimated": True, "auto": True, "reason": why,
+               "source": "guard"}
+        path = os.path.join(d, "usage_stats.json")
+        data = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        sessions = data.get("sessions") if isinstance(data, dict) else []
+        sessions = sessions if isinstance(sessions, list) else []
+        for x in sessions[-5:]:
+            if x.get("source") == "guard" and abs(float(x.get("ts") or 0) - end) < 180:
+                return
+        if sessions and abs(float(sessions[-1].get("ts") or 0) - end) < 60:
+            return
+        sessions.append(rec)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"sessions": sessions[-2000:]}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        log(f"账本已记一笔（看门狗）：{use_l} 升 · 省 ¥{charge:.3f}（{why}）")
+    except Exception as e:  # noqa: BLE001
+        log(f"账本写入失败：{type(e).__name__}: {e}")
+
+
+def _close_once(loop, st, log, d, why="auto"):
     wv = _load_wv()
     wv.load_config()
     mac = (st.get("mac") or wv.CFG.get("mac") or "").upper()
@@ -116,8 +172,10 @@ def _close_once(loop, st, log):
                     log("设备空闲，补清账")
                     r = loop.run_until_complete(
                         wv.ble_reclear(valve, session, zero_usage=True))
+                    _ledger_add(d, st, r, why, log)
                     return bool(r.get("ok") or r.get("onCharge") == "00")
                 log("设备已空闲")
+                _ledger_add(d, st, {}, why, log)
                 return True
         except Exception as e:
             log(f"预查失败：{type(e).__name__}")
@@ -127,10 +185,14 @@ def _close_once(loop, st, log):
         log(f"结算 ok={r.get('ok')} onCharge={r.get('onCharge')} "
             f"upload={r.get('upload')} clear={r.get('clear_by')}")
         if r.get("ok") or r.get("onCharge") == "00":
+            _ledger_add(d, st, r, why, log)
             return True
         try:
             st2 = loop.run_until_complete(valve.query_status())
-            return (st2 or {}).get("onCharge") == "00"
+            if (st2 or {}).get("onCharge") == "00":
+                _ledger_add(d, st, r, why, log)
+                return True
+            return False
         except Exception:
             return False
     except Exception as e:
@@ -214,7 +276,7 @@ def main() -> int:
                                    "主进程退出" if not alive else
                                    "心跳超时" if not fresh else "重启")
                             log(f"收尾（{why}）state={st.get('state')} pid={pid}")
-                            if _close_once(loop, st, log):
+                            if _close_once(loop, st, log, d, why):
                                 vs.write_journal(d, state="closed",
                                                  closed_ts=time.time(),
                                                  closed_by="guard",
