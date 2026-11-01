@@ -1,8 +1,8 @@
 {
-  "id": "2026-11-01-wechat-pay-01",
+  "id": "2026-11-01-wechat-pay-02",
   "enabled": true,
-  "title": "嘿嘿嘿嘿……月初了，生活费发了吧？我是不是可以讨你要一点money呢？",
-  "body": "",
+  "title": "乞讨",
+  "body": "嘿嘿嘿嘿……\n月初了，生活费发了吧？\n我是不是可以讨你要一点money呢？",
   "images": [
     "https://raw.githubusercontent.com/lc655254/water-valve-ble/main/docs/announcement/wechat-pay.png"
   ],
