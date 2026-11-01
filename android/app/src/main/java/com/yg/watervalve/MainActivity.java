@@ -225,7 +225,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         updateXiaolianButton();
         requestPerms();
-        appendLog("安卓版启动，版本 0.6.1");
+        appendLog("安卓版启动，版本 0.6.2");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -406,13 +406,16 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             if (isFinishing() || isDestroyed()) return;
             btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
             if (error != null) {
+                appendLog("检查更新失败：" + error);
                 if (!silent) toast("检查更新失败：" + error);
                 return;
             }
             if (info == null || !info.hasUpdate) {
+                appendLog("检查更新：当前版本已是最新");
                 if (!silent) showLatestDialog();
                 return;
             }
+            appendLog("检查更新：发现新版本 v" + info.version);
             if (silent) {
                 pendingUpdate = info;
                 btnCheckUpdate.setText("发现 v" + info.version + " · 点此更新");
@@ -433,7 +436,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
         version.setText("v" + Updater.currentVersion(this));
         meta.setText("已是最新版本");
-        notesView.setText("当前版本已是最新。\n\n保留极简界面、断线重连和 30 分钟关阀兜底。");
+        notesView.setText("当前版本已是最新。");
         install.setVisibility(View.GONE);
         later.setText("关闭");
 
