@@ -1,6 +1,8 @@
 package com.yg.watervalve;
 
+import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
@@ -53,12 +55,25 @@ public final class ValveManager {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final BleClient ble;
+    private final BluetoothAdapter adapter;
     private final List<ScanItem> devices = new ArrayList<>();
     private Listener listener;
     private Cloud.Session session;
     private volatile boolean running;
     private volatile boolean busy;
     private volatile boolean closing;
+    private volatile boolean recovering;
+    private boolean safetyOpen;
+    private String bleAddr = "";
+    private BluetoothDevice lastDevice;
+    private int reconnectAttempts;
+    private int recoveryRetries;
+    private int noDeviceRetries;
+    private volatile boolean recoveryCloseRunning;
+    private Runnable reconnectRunnable;
+    private Runnable recoveryRetryRunnable;
+    private static final int MAX_RECONNECT = 20;
+    private static final int MAX_RECOVERY_RETRY = 3;
     private String lastRn = "";
     private String lastRnPre = "";
     private String lastCm = "";
@@ -73,14 +88,21 @@ public final class ValveManager {
     private ValveManager(Context ctx) {
         context = ctx;
         prefs = ctx.getSharedPreferences("water_valve", Context.MODE_PRIVATE);
+        BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+        adapter = bm == null ? null : bm.getAdapter();
         session = Cloud.Session.fromJson(prefs.getString("session", ""));
         lastRn = prefs.getString("last_rn", "");
         lastRnPre = prefs.getString("last_rn_pre", "");
         lastCm = prefs.getString("last_cm", "");
         mac = prefs.getString("mac", "");
+        bleAddr = prefs.getString("ble_addr", "");
         deviceName = prefs.getString("name", "");
         devId = prefs.getInt("dev_id", 0);
         clearPref = prefs.getString("clear_pref", "");
+        safetyOpen = prefs.getBoolean("safety_open", false);
+        openTs = prefs.getLong("safety_open_ts", 0L);
+        running = safetyOpen;
+        lastDevice = resolveSavedDevice();
         ble = new BleClient(ctx, bleListener);
     }
 
@@ -97,6 +119,8 @@ public final class ValveManager {
     public boolean isRunning() { return running; }
     public boolean isBusy() { return busy; }
     public boolean isConnected() { return ble.isReady(); }
+    public boolean hasOpenSession() { return safetyOpen; }
+    public long getOpenTs() { return openTs; }
 
     public void savePhone(String phone) {
         prefs.edit().putString("phone", phone).apply();
@@ -155,7 +179,33 @@ public final class ValveManager {
 
     public void connect(ScanItem item) {
         if (busy) return;
+        String addr;
+        try {
+            addr = item.device.getAddress();
+        } catch (SecurityException e) {
+            addr = "";
+        }
+        if (safetyOpen) {
+            String want = bleAddr;
+            if ((want == null || want.isEmpty()) && lastDevice != null) {
+                try {
+                    want = lastDevice.getAddress();
+                } catch (SecurityException ignored) {
+                }
+            }
+            if (want != null && !want.isEmpty() && addr != null && !addr.isEmpty()
+                    && !want.equalsIgnoreCase(addr)) {
+                log("上次未关水的是 " + want + "，请先连接它完成关阀");
+                return;
+            }
+        }
         setBusy(true, "连接水表");
+        stopReconnect();
+        recovering = safetyOpen;
+        recoveryRetries = 0;
+        lastDevice = item.device;
+        bleAddr = addr;
+        saveDevice();
         io.execute(() -> {
             try {
                 deviceName = item.name;
@@ -193,6 +243,7 @@ public final class ValveManager {
                 openInternal();
             } catch (Exception e) {
                 log("开水中止：" + msg(e));
+                if (hasOpenSession() && !recovering) recoverIfOpen(true);
             } finally {
                 setBusy(false, "");
             }
@@ -228,7 +279,7 @@ public final class ValveManager {
         closing = true;
         io.execute(() -> {
             try {
-                if (running) closeInternal(reason);
+                if (running || safetyOpen) closeInternal(reason);
             } catch (Exception e) {
                 log("服务关阀异常：" + msg(e));
             } finally {
@@ -257,6 +308,11 @@ public final class ValveManager {
     private void openInternal() throws Exception {
         if (session == null) {
             log("先登录账号");
+            return;
+        }
+        if (safetyOpen) {
+            log("上次放水未确认关闭，先恢复");
+            recoverIfOpen(true);
             return;
         }
         if (!ble.isReady()) {
@@ -310,48 +366,76 @@ public final class ValveManager {
         log("云端下单（预扣 5 元）…");
         Cloud.RateOrder ro = Cloud.rateOrder(session, devId, q.tacTimes, q.commMode, mac);
         log("拿到 downData，费率 rate=" + ro.rate + " 厘");
+
+        // 发 21 之前先落安全日志并拉起前台服务：即使下一秒进程被杀，也能恢复关阀。
+        openTs = System.currentTimeMillis();
+        lastFlow = null;
+        lastRateOrder = ro.rate;
+        lastRnPre = q.tacTimes;
+        lastRn = q.tacTimes;
+        lastCm = q.commMode;
+        safetyOpen = true;
+        saveDevice();
+        saveSafety();
+        ValveService.scheduleAlarm(context, openTs);
+        try {
+            ValveService.start(context);
+        } catch (Exception e) {
+            log("前台服务启动失败：" + msg(e));
+        }
+
         try {
             ble.sendAndWait("21", ro.downData, 8000);
             log("设备已接受费率");
         } catch (TimeoutException e) {
             log("21 无回帧（部分设备静默执行），继续确认状态…");
+        } catch (Exception e) {
+            log("21 发送异常：" + msg(e) + "，继续确认状态…");
         }
         for (int i = 1; i <= 5; i++) {
             Thread.sleep(2000);
             Protocol.Query q2 = ble.queryStatus();
             if ("01".equals(q2.onCharge) || "03".equals(q2.onCharge)) {
                 running = true;
-                openTs = System.currentTimeMillis();
-                lastFlow = null;
-                lastRateOrder = ro.rate;
-                lastRnPre = q.tacTimes;
                 lastRn = q2.tacTimes == null || q2.tacTimes.isEmpty() ? q.tacTimes : q2.tacTimes;
                 lastCm = q.commMode;
                 saveDevice();
+                saveSafety();
+                ValveService.scheduleAlarm(context, openTs);
                 main.post(() -> {
                     if (listener != null) listener.onWater(true);
                 });
-                try {
-                    ValveService.start(context);
-                } catch (Exception e) {
-                    log("前台服务启动失败：" + msg(e));
-                }
                 log("已开始放水（onCharge=" + q2.onCharge + "）");
                 return;
             }
             log("轮询 " + i + "：onCharge=" + q2.onCharge + "，等待…");
         }
         log("未确认放水，执行安全关阀");
-        settleInternal();
-        running = false;
+        boolean closed = settleInternal();
+        if (closed) {
+            clearSafety();
+            running = false;
+            try {
+                ValveService.stop(context);
+            } catch (Exception ignored) {
+            }
+        } else {
+            running = true;
+            log("安全关阀未完成，保留安全日志并等待恢复");
+        }
         main.post(() -> {
-            if (listener != null) listener.onWater(false);
+            if (listener != null) listener.onWater(running);
         });
     }
 
     private void closeInternal(String reason) throws Exception {
         if (!ble.isReady()) {
-            log("水表未连接，无法关阀；请靠近水表重连");
+            log("水表未连接，自动重连后再关阀");
+            if (safetyOpen || running) {
+                recovering = true;
+                stopReconnect();
+                scheduleReconnect();
+            }
             return;
         }
         boolean wasRunning = running;
@@ -362,6 +446,7 @@ public final class ValveManager {
             running = false;
             openTs = 0;
             lastFlow = null;
+            clearSafety();
             main.post(() -> {
                 if (listener != null) listener.onWater(false);
             });
@@ -599,9 +684,149 @@ public final class ValveManager {
         return Math.round(v * 10000.0) / 10000.0;
     }
 
+    private void saveSafety() {
+        boolean ok = prefs.edit()
+                .putBoolean("safety_open", safetyOpen)
+                .putLong("safety_open_ts", openTs)
+                .putString("ble_addr", bleAddr == null ? "" : bleAddr)
+                .putString("last_rn", lastRn)
+                .putString("last_rn_pre", lastRnPre)
+                .putString("last_cm", lastCm)
+                .commit();
+        if (!ok) log("安全日志写入失败，关阀兜底可能受影响");
+    }
+
+    private void clearSafety() {
+        safetyOpen = false;
+        openTs = 0L;
+        recovering = false;
+        recoveryRetries = 0;
+        noDeviceRetries = 0;
+        if (recoveryRetryRunnable != null) main.removeCallbacks(recoveryRetryRunnable);
+        recoveryRetryRunnable = null;
+        stopReconnect();
+        prefs.edit().putBoolean("safety_open", false)
+                .remove("safety_open_ts").commit();
+        ValveService.cancelAlarm(context);
+    }
+
+    /** 启动/开机/闹钟恢复：重连上次水表并补零用量关阀。 */
+    public void recoverIfOpen(boolean force) {
+        if (!safetyOpen || recovering) return;
+        if (ble.isReady() && running && !force) {
+            log("正在放水，跳过启动恢复");
+            return;
+        }
+        stopReconnect();
+        recovering = true;
+        running = true;
+        recoveryRetries = 0;
+        main.post(() -> {
+            if (listener != null) listener.onWater(true);
+        });
+        log("检测到未确认关水，开始自动恢复…");
+        if (ble.isReady()) {
+            attemptRecoveryClose();
+            return;
+        }
+        BluetoothDevice d = resolveSavedDevice();
+        if (d == null) {
+            log("找不到上次水表地址，无法自动恢复；请手动连接后关水");
+            recovering = false;
+            if (noDeviceRetries < 8) {
+                noDeviceRetries++;
+                main.postDelayed(() -> recoverIfOpen(true), 15000);
+            }
+            return;
+        }
+        noDeviceRetries = 0;
+        lastDevice = d;
+        scheduleReconnect();
+    }
+
+    private void attemptRecoveryClose() {
+        if (recoveryCloseRunning) return;
+        if (recoveryRetryRunnable != null) {
+            main.removeCallbacks(recoveryRetryRunnable);
+            recoveryRetryRunnable = null;
+        }
+        recoveryCloseRunning = true;
+        io.execute(() -> {
+            try {
+                closeInternal("断线/重启恢复");
+            } catch (Exception e) {
+                log("恢复关阀失败：" + msg(e));
+            } finally {
+                recoveryCloseRunning = false;
+            }
+            if (!hasOpenSession()) return;
+            if (recoveryRetries >= MAX_RECOVERY_RETRY) {
+                recovering = false;
+                log("恢复关阀未完成，请手动关水或等待闹钟兜底");
+                return;
+            }
+            recoveryRetries++;
+            log("恢复重试 " + recoveryRetries + "/" + MAX_RECOVERY_RETRY + "…");
+            recoveryRetryRunnable = this::attemptRecoveryClose;
+            main.postDelayed(recoveryRetryRunnable, 5000);
+        });
+    }
+
+    private BluetoothDevice resolveSavedDevice() {
+        if (adapter == null) return null;
+        String a = bleAddr;
+        if ((a == null || a.isEmpty()) && mac != null
+                && mac.matches("(?i)([0-9A-F]{2}:){5}[0-9A-F]{2}")) {
+            a = mac;
+        }
+        if (a == null || a.isEmpty()) return null;
+        try {
+            return adapter.getRemoteDevice(a);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void scheduleReconnect() {
+        if (reconnectRunnable != null) return;
+        if (lastDevice == null) lastDevice = resolveSavedDevice();
+        if (lastDevice == null) return;
+        Runnable r = new Runnable() {
+            @Override
+            public void run() {
+                if (ble.isReady()) {
+                    reconnectRunnable = null;
+                    reconnectAttempts = 0;
+                    return;
+                }
+                if (reconnectAttempts >= MAX_RECONNECT) {
+                    reconnectRunnable = null;
+                    recovering = false;
+                    log("自动重连失败（" + MAX_RECONNECT + " 次），请靠近水表手动重连");
+                    return;
+                }
+                reconnectAttempts++;
+                log("自动重连 " + reconnectAttempts + "/" + MAX_RECONNECT + "…");
+                final BluetoothDevice d = lastDevice;
+                io.execute(() -> ble.connect(d));
+                reconnectRunnable = this;
+                main.postDelayed(this, 5000);
+            }
+        };
+        reconnectRunnable = r;
+        main.postDelayed(r, 1200);
+    }
+
+    private void stopReconnect() {
+        if (reconnectRunnable != null) main.removeCallbacks(reconnectRunnable);
+        reconnectRunnable = null;
+        reconnectAttempts = 0;
+    }
+
     private void saveDevice() {
         prefs.edit()
                 .putString("mac", mac == null ? "" : mac)
+                .putString("ble_addr", bleAddr == null ? "" : bleAddr)
                 .putString("name", deviceName == null ? "" : deviceName)
                 .putInt("dev_id", devId)
                 .putString("last_rn", lastRn)
@@ -631,24 +856,35 @@ public final class ValveManager {
                 log(msg);
                 setBusy(false, "");
                 notifyConnection(false);
+                if (safetyOpen || running) {
+                    recovering = true;
+                    scheduleReconnect();
+                }
             }
         }
 
         @Override
         public void onReady() {
+            stopReconnect();
             main.post(() -> {
                 log("水表已连接");
                 setBusy(false, "");
                 if (ble.getDevice() != null) {
                     deviceName = ble.getSelectedName();
                     try {
-                        mac = ble.getDevice().getAddress();
+                        bleAddr = ble.getDevice().getAddress();
+                        if (mac == null || mac.isEmpty()) mac = bleAddr;
                     } catch (SecurityException ignored) {
                     }
                     saveDevice();
                 }
             });
             notifyConnection(true);
+            if (recovering || hasOpenSession()) {
+                recovering = true;
+                attemptRecoveryClose();
+                return;
+            }
             io.execute(() -> {
                 try {
                     queryInternal();
@@ -662,7 +898,11 @@ public final class ValveManager {
         public void onDisconnected(String msg) {
             log(msg);
             notifyConnection(false);
-            if (running) log("警告：连接断开，阀门可能仍在出水；请靠近水表重连后关水");
+            if (safetyOpen || running) {
+                recovering = true;
+                log("连接断开，自动重连并补关水…");
+            }
+            scheduleReconnect();
         }
     };
 
