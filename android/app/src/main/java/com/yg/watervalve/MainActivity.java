@@ -186,11 +186,41 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 return;
             }
             if (info == null || !info.hasUpdate) {
-                if (!silent) toast("已是最新版本 v" + Updater.currentVersion(this));
+                if (!silent) showLatestDialog();
                 return;
             }
             showUpdateDialog(info);
         });
+    }
+
+    private void showLatestDialog() {
+        View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
+        TextView version = v.findViewById(R.id.dialogVersion);
+        TextView meta = v.findViewById(R.id.dialogMeta);
+        TextView notesView = v.findViewById(R.id.dialogNotes);
+        Button install = v.findViewById(R.id.dialogInstall);
+        TextView later = v.findViewById(R.id.dialogLater);
+
+        version.setText("v" + Updater.currentVersion(this));
+        meta.setText("已是最新版本");
+        notesView.setText("当前版本已是最新。\n\n保留极简界面、断线重连和 30 分钟关阀兜底。");
+        install.setVisibility(View.GONE);
+        later.setText("关闭");
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(v);
+        dialog.setCanceledOnTouchOutside(true);
+        later.setOnClickListener(x -> dialog.dismiss());
+        dialog.show();
+        Window dw = dialog.getWindow();
+        if (dw != null) {
+            dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dw.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dw.setDimAmount(0.35f);
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
+            dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private void showUpdateDialog(Updater.Info info) {
