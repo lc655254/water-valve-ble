@@ -29,6 +29,8 @@ import time
 import uuid
 from collections import deque
 
+import requests
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -69,7 +71,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -1127,6 +1129,58 @@ def api_stats():
 @app.route("/api/state")
 def api_state():
     return jsonify(snapshot())
+
+
+ANN_URL = ("https://raw.githubusercontent.com/lc655254/water-valve-ble/"
+           "main/docs/announcement.json")
+ANN_CACHE = {"data": None, "ts": 0.0}
+
+
+def _announcement_for_pc(d):
+    if not isinstance(d, dict) or not d.get("enabled"):
+        return None
+    platforms = d.get("platforms")
+    if isinstance(platforms, list) and "pc" not in platforms:
+        return None
+    minv = str(d.get("minPcVersion") or "").strip()
+    maxv = str(d.get("maxPcVersion") or "").strip()
+    if minv and updater.ver_key(APP_VERSION) < updater.ver_key(minv):
+        return None
+    if maxv and updater.ver_key(APP_VERSION) > updater.ver_key(maxv):
+        return None
+    return d
+
+
+def _fetch_announcement():
+    """GitHub 公告：本地接口代拉，避免 WebView 的 CORS/镜像差异。"""
+    now = time.time()
+    if ANN_CACHE["data"] is not None and now - ANN_CACHE["ts"] < 8:
+        return ANN_CACHE["data"]
+    prefixes = ("", "https://gh-proxy.com/", "https://ghproxy.net/")
+    for prefix in prefixes:
+        try:
+            url = prefix + ANN_URL + "?t=" + str(int(now * 1000))
+            r = requests.get(url, timeout=7, headers={
+                "User-Agent": "WaterValve-PC",
+                "Accept": "application/json",
+            })
+            if r.status_code != 200:
+                continue
+            data = _announcement_for_pc(r.json())
+            ANN_CACHE["data"] = data
+            ANN_CACHE["ts"] = now
+            return data
+        except Exception:
+            continue
+    return ANN_CACHE["data"]
+
+
+@app.route("/api/announcement")
+def api_announcement():
+    try:
+        return jsonify({"ok": True, "data": _fetch_announcement()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
 
 
 @app.route("/api/copy", methods=["POST"])

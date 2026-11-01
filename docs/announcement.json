@@ -11,5 +11,10 @@
   "button": "我知道了",
   "once": true,
   "minVersionCode": 21,
-  "maxVersionCode": 999999
+  "maxVersionCode": 999999,
+  "platforms": [
+    "android",
+    "pc"
+  ],
+  "minPcVersion": "1.0.7"
 }
