@@ -225,7 +225,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         updateXiaolianButton();
         requestPerms();
-        appendLog("安卓版启动，版本 0.6.2");
+        appendLog("安卓版启动，版本 0.6.3");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
