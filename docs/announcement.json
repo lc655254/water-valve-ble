@@ -10,6 +10,6 @@
   "linkText": "查看详情",
   "button": "我知道了",
   "once": true,
-  "minVersionCode": 20,
+  "minVersionCode": 21,
   "maxVersionCode": 999999
 }

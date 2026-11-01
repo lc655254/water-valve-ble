@@ -1,6 +1,6 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（MVP 0.7.1）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（MVP 0.7.2）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和 GitHub 公告弹窗。
 
 ## 功能
 
