@@ -52,17 +52,55 @@ public final class Cloud {
         JSONObject data = d.getJSONObject("data");
         JSONObject ua = data.getJSONObject("userAccount");
         Session s = new Session();
-        s.loginCode = data.optString("loginCode", "");
-        s.userId = data.optString("userId", "");
-        s.projectId = ua.optString("projectId", "");
-        s.accountId = ua.optString("accountId", "");
-        s.telephone = data.optString("telephone", phone);
-        s.userName = ua.optString("name", "");
-        s.balance = ua.optString("accountRealMoney", "");
+        s.loginCode = safeString(data, "loginCode");
+        s.userId = safeString(data, "userId");
+        s.projectId = safeString(ua, "projectId");
+        s.accountId = safeString(ua, "accountId");
+        s.telephone = safeString(data, "telephone");
+        if (s.telephone.isEmpty()) s.telephone = phone;
+        s.userName = safeString(ua, "name");
+        s.balance = moneyText(ua.opt("accountRealMoney"));
         if (s.loginCode.isEmpty() || s.userId.isEmpty()) {
             throw new ApiException(-1, "登录返回缺少 loginCode/userId");
         }
         return s;
+    }
+
+    public static String fmtMoney(String raw) {
+        if (raw == null) return "";
+        String s = raw.trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) return "";
+        try {
+            double v = Double.parseDouble(s);
+            if (s.contains(".")) return String.format(java.util.Locale.CHINA, "%.3f", v);
+            return String.format(java.util.Locale.CHINA, "%.3f", v / 1000.0);
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
+    private static String safeString(JSONObject o, String key) {
+        if (o == null) return "";
+        Object v = o.opt(key);
+        if (v == null || v == JSONObject.NULL) return "";
+        String s = String.valueOf(v);
+        return "null".equalsIgnoreCase(s) ? "" : s;
+    }
+
+    private static String moneyText(Object v) {
+        if (v == null || v == JSONObject.NULL) return "";
+        if (v instanceof Number) {
+            return String.format(java.util.Locale.CHINA, "%.3f",
+                    ((Number) v).doubleValue() / 1000.0);
+        }
+        String s = String.valueOf(v).trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) return "";
+        try {
+            return s.contains(".") ? s
+                    : String.format(java.util.Locale.CHINA, "%.3f", Double.parseDouble(s) / 1000.0);
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     public static RateOrder rateOrder(Session s, int deviceId, String randomNumber,
@@ -234,12 +272,16 @@ public final class Cloud {
                 s.projectId = o.optString("projectId", "");
                 s.accountId = o.optString("accountId", "");
                 s.telephone = o.optString("telephone", "");
-                s.userName = o.optString("userName", "");
-                s.balance = o.optString("balance", "");
+                s.userName = clean(o.optString("userName", ""));
+                s.balance = clean(o.optString("balance", ""));
                 return s.loginCode.isEmpty() ? null : s;
             } catch (Exception e) {
                 return null;
             }
+        }
+
+        private static String clean(String s) {
+            return s == null || "null".equalsIgnoreCase(s) ? "" : s;
         }
     }
 }
