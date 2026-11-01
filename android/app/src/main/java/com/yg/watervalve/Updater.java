@@ -87,7 +87,7 @@ public final class Updater {
                             x.url = a.optString("browser_download_url", "");
                             x.digest = a.optString("digest", "");
                             x.size = a.optLong("size", 0);
-                            x.notes = release.optString("body", "");
+                            x.notes = androidNotes(release.optString("body", ""));
                             best = x;
                         }
                     }
@@ -229,6 +229,36 @@ public final class Updater {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             s.commit(pending.getIntentSender());
         }
+    }
+
+    private static String androidNotes(String body) {
+        if (body == null) return "";
+        String[] lines = body.replace("\r", "").split("\n");
+        StringBuilder sb = new StringBuilder();
+        boolean inAndroid = false;
+        for (String raw : lines) {
+            String t = raw.trim();
+            if (t.isEmpty()) continue;
+            String low = t.toLowerCase(Locale.ROOT);
+            boolean start = low.startsWith("## android")
+                    || low.startsWith("# android")
+                    || low.matches("^android\\s+v?[0-9].*");
+            if (start) {
+                inAndroid = true;
+                continue;
+            }
+            if (!inAndroid) continue;
+            if (low.startsWith("## ") || low.startsWith("# ")
+                    || low.matches("^windows\\s+v?[0-9].*")) break;
+            if (t.startsWith("```")) continue;
+            String line = t.replaceFirst("^[-*+]\\s*", "• ");
+            if (sb.length() + line.length() > 600) break;
+            sb.append(line).append('\n');
+        }
+        String s = sb.toString().trim();
+        if (!s.isEmpty()) return s;
+        s = body.trim();
+        return s.length() > 360 ? s.substring(0, 360) + "…" : s;
     }
 
     private static JSONObject getJson(String url) throws Exception {

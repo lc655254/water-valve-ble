@@ -3,12 +3,14 @@ package com.yg.watervalve;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -165,7 +167,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnCheckUpdate.setOnClickListener(v -> checkUpdate(false));
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.4.0");
+        appendLog("安卓版启动，版本 0.4.1");
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
@@ -196,24 +198,41 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             toast("放水中，先关水再更新");
             return;
         }
+        View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
+        TextView version = v.findViewById(R.id.dialogVersion);
+        TextView meta = v.findViewById(R.id.dialogMeta);
+        TextView notesView = v.findViewById(R.id.dialogNotes);
+        Button install = v.findViewById(R.id.dialogInstall);
+        TextView later = v.findViewById(R.id.dialogLater);
+
+        version.setText("v" + info.version);
+        meta.setText(mb(info.size) + " · 当前 v" + Updater.currentVersion(this));
         String notes = info.notes == null ? "" : info.notes.trim();
-        if (notes.length() > 600) notes = notes.substring(0, 600) + "…";
-        String msg = "当前版本 v" + Updater.currentVersion(this)
-                + "\n新版本 v" + info.version + " · " + mb(info.size)
-                + (notes.isEmpty() ? "" : "\n\n" + notes);
-        new AlertDialog.Builder(this)
-                .setTitle("发现新版本")
-                .setMessage(msg)
-                .setPositiveButton("下载并安装", (d, w) -> {
-                    if (!Updater.canInstall(this)) {
-                        Updater.openInstallSettings(this);
-                        toast("请允许安装未知应用后再试");
-                        return;
-                    }
-                    downloadUpdate(info);
-                })
-                .setNegativeButton("稍后", null)
-                .show();
+        notesView.setText(notes.isEmpty() ? "包含界面与稳定性更新。" : notes);
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(v);
+        dialog.setCanceledOnTouchOutside(true);
+        install.setOnClickListener(x -> {
+            dialog.dismiss();
+            if (!Updater.canInstall(this)) {
+                Updater.openInstallSettings(this);
+                toast("请允许安装未知应用后再试");
+                return;
+            }
+            downloadUpdate(info);
+        });
+        later.setOnClickListener(x -> dialog.dismiss());
+        dialog.show();
+        Window dw = dialog.getWindow();
+        if (dw != null) {
+            dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dw.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dw.setDimAmount(0.35f);
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
+            dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private void downloadUpdate(Updater.Info info) {
