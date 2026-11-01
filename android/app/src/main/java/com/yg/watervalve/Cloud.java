@@ -103,6 +103,30 @@ public final class Cloud {
         }
     }
 
+    public static String refreshBalance(Session s) throws Exception {
+        if (s == null) return null;
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("loginCode", s.loginCode);
+        p.put("userId", s.userId);
+        p.put("accountId", s.accountId);
+        p.put("projectId", s.projectId);
+        p.put("telephone", s.telephone);
+        p.put("phoneSystem", "ios");
+        p.put("version", "6.5.26");
+        p.put("telPhone", s.telephone);
+        JSONObject d = get("/account/wallet", p);
+        if (d.optInt("errorCode", -1) != 0) return null;
+        JSONObject data = d.optJSONObject("data");
+        if (data == null) return null;
+        for (String k : new String[]{"accountRealMoneyStr", "money", "accountRealMoney"}) {
+            Object v = data.opt(k);
+            if (v == null || v == JSONObject.NULL) continue;
+            String m = moneyText(v);
+            if (!m.isEmpty()) return m;
+        }
+        return null;
+    }
+
     public static RateOrder rateOrder(Session s, int deviceId, String randomNumber,
                                       String commMode, String mac) throws Exception {
         String sig = Protocol.signature(

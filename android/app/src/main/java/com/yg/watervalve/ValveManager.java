@@ -6,9 +6,13 @@ import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
@@ -22,6 +26,7 @@ public final class ValveManager {
         void onSession(Cloud.Session session);
         void onDevices(List<ScanItem> devices);
         void onQuery(Protocol.Query query);
+        void onStats(String text);
     }
 
     public static final class ScanItem {
@@ -60,6 +65,9 @@ public final class ValveManager {
     private String deviceName = "";
     private int devId;
     private String clearPref = "";
+    private long openTs;
+    private Protocol.Flow lastFlow;
+    private int lastRateOrder;
 
     private ValveManager(Context ctx) {
         context = ctx;
@@ -75,7 +83,11 @@ public final class ValveManager {
         ble = new BleClient(ctx, bleListener);
     }
 
-    public void setListener(Listener l) { listener = l; }
+    public void setListener(Listener l) {
+        listener = l;
+        notifyStats();
+        notifySession();
+    }
     public Cloud.Session getSession() { return session; }
     public String getPhone() { return prefs.getString("phone", ""); }
     public String getMac() { return mac; }
@@ -108,6 +120,11 @@ public final class ValveManager {
         io.execute(() -> {
             try {
                 Cloud.Session s = Cloud.loginByCode(phone, code);
+                try {
+                    String bal = Cloud.refreshBalance(s);
+                    if (bal != null && !bal.isEmpty()) s.balance = bal;
+                } catch (Exception ignored) {
+                }
                 session = s;
                 prefs.edit().putString("session", s.toJson().toString())
                         .putString("phone", phone).apply();
@@ -301,6 +318,9 @@ public final class ValveManager {
             Protocol.Query q2 = ble.queryStatus();
             if ("01".equals(q2.onCharge) || "03".equals(q2.onCharge)) {
                 running = true;
+                openTs = System.currentTimeMillis();
+                lastFlow = null;
+                lastRateOrder = ro.rate;
                 lastRnPre = q.tacTimes;
                 lastRn = q2.tacTimes == null || q2.tacTimes.isEmpty() ? q.tacTimes : q2.tacTimes;
                 lastCm = q.commMode;
@@ -331,9 +351,14 @@ public final class ValveManager {
             log("水表未连接，无法关阀；请靠近水表重连");
             return;
         }
+        boolean wasRunning = running;
+        long start = openTs;
         boolean ok = settleInternal();
         if (ok) {
+            if (wasRunning && start > 0) recordSession(start);
             running = false;
+            openTs = 0;
+            lastFlow = null;
             main.post(() -> {
                 if (listener != null) listener.onWater(false);
             });
@@ -342,6 +367,7 @@ public final class ValveManager {
             } catch (Exception ignored) {
             }
             log("已关水（" + reason + "）");
+            refreshBalanceAndNotify();
         } else {
             log("关阀未确认，阀门可能仍开着，请重试或靠近水表");
         }
@@ -372,6 +398,7 @@ public final class ValveManager {
                 if ("80".equals(rc)) {
                     collectFull = Protocol.normHex(f.dataArea);
                     Protocol.Flow flow = Protocol.parseFlow(collectFull);
+                    lastFlow = flow;
                     log("85 采集成功：" + flow.brief());
                     break;
                 }
@@ -470,6 +497,97 @@ public final class ValveManager {
             }
         }
         return false;
+    }
+
+    private void recordSession(long start) {
+        if (lastFlow == null || !lastFlow.ok) {
+            log("账本：本次没取到流水，不记账");
+            return;
+        }
+        long end = System.currentTimeMillis();
+        int seconds = (int) Math.max(0, (end - start) / 1000);
+        int count = lastFlow.useCountI;
+        int rate = lastFlow.rate2I > 0 ? lastFlow.rate2I : lastFlow.rate1I;
+        if (rate <= 0) rate = lastRateOrder;
+        double liters = Math.max(0.0, count * 0.5);
+        double byUse = liters * rate / 1000.0;
+        double charge = Math.max(byUse, 0.025);
+        try {
+            JSONObject rec = new JSONObject();
+            rec.put("ts", end);
+            rec.put("start", start);
+            rec.put("seconds", seconds);
+            rec.put("count", count);
+            rec.put("liters", round3(liters));
+            rec.put("rate", rate);
+            rec.put("official", round4(charge));
+            rec.put("paid", 0.0);
+            rec.put("saved", round4(charge));
+            rec.put("source", "android");
+            JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
+            arr.put(rec);
+            while (arr.length() > 200) arr.remove(0);
+            prefs.edit().putString("ledger", arr.toString()).apply();
+            log(String.format(Locale.CHINA,
+                    "账本：%d 计数 → %.3f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥0 · 省 ¥%.3f",
+                    count, liters, seconds, rate, charge, charge));
+            notifyStats();
+        } catch (Exception e) {
+            log("账本记录失败：" + msg(e));
+        }
+    }
+
+    public String getStatsText() {
+        try {
+            JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
+            if (arr.length() == 0) return "账本：还没有记录";
+            double liters = 0, saved = 0;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject r = arr.optJSONObject(i);
+                if (r == null) continue;
+                liters += r.optDouble("liters", 0);
+                saved += r.optDouble("saved", 0);
+            }
+            JSONObject last = arr.optJSONObject(arr.length() - 1);
+            int sec = last == null ? 0 : last.optInt("seconds", 0);
+            double l = last == null ? 0 : last.optDouble("liters", 0);
+            double s = last == null ? 0 : last.optDouble("saved", 0);
+            return String.format(Locale.CHINA,
+                    "本次：%d 秒 · %.3f L · 省 ¥%.3f\n累计：%d 次 · %.3f L · 省 ¥%.3f",
+                    sec, l, s, arr.length(), liters, saved);
+        } catch (Exception e) {
+            return "账本：读取失败";
+        }
+    }
+
+    private void notifyStats() {
+        String t = getStatsText();
+        main.post(() -> {
+            if (listener != null) listener.onStats(t);
+        });
+    }
+
+    private void refreshBalanceAndNotify() {
+        if (session == null) return;
+        try {
+            String bal = Cloud.refreshBalance(session);
+            if (bal != null && !bal.isEmpty()) {
+                session.balance = bal;
+                prefs.edit().putString("session", session.toJson().toString()).apply();
+                notifySession();
+                log("余额已刷新：" + Cloud.fmtMoney(bal) + " 元");
+            }
+        } catch (Exception e) {
+            log("余额刷新失败：" + msg(e));
+        }
+    }
+
+    private static double round3(double v) {
+        return Math.round(v * 1000.0) / 1000.0;
+    }
+
+    private static double round4(double v) {
+        return Math.round(v * 10000.0) / 10000.0;
     }
 
     private void saveDevice() {

@@ -23,7 +23,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity implements ValveManager.Listener {
     private ValveManager manager;
-    private TextView sessionStatus, balance, deviceStatus, waterStatus, logView;
+    private TextView sessionStatus, balance, deviceStatus, waterStatus, logView, stats;
     private EditText phone, code;
     private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater;
     private LinearLayout deviceList;
@@ -37,12 +37,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         manager = ValveManager.get(this);
-        manager.setListener(this);
 
         sessionStatus = findViewById(R.id.sessionStatus);
         balance = findViewById(R.id.balance);
         deviceStatus = findViewById(R.id.deviceStatus);
         waterStatus = findViewById(R.id.waterStatus);
+        stats = findViewById(R.id.stats);
         logView = findViewById(R.id.log);
         logScroll = findViewById(R.id.logScroll);
         phone = findViewById(R.id.phone);
@@ -53,11 +53,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnQuery = findViewById(R.id.btnQuery);
         btnWater = findViewById(R.id.btnWater);
         deviceList = findViewById(R.id.deviceList);
+        manager.setListener(this);
 
         phone.setText(manager.getPhone());
         running = manager.isRunning();
         renderSession(manager.getSession());
         renderDevice();
+        stats.setText(manager.getStatsText());
         btnWater.setText(running ? "关水" : "开水");
         waterStatus.setText(running ? "正在放水" : "状态未知");
         if (running) {
@@ -91,7 +93,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.1.1");
+        appendLog("安卓版启动，版本 0.1.2");
     }
 
     private void requestPerms() {
@@ -233,6 +235,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     public void onQuery(Protocol.Query q) {
         waterStatus.setText("设备：" + q.statusText() + " · onCharge=" + q.onCharge);
         renderDevice();
+    }
+
+    @Override
+    public void onStats(String text) {
+        stats.setText(text);
     }
 
     @Override
