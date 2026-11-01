@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#F3F7FC</color>
+    <color name="card">#FFFFFF</color>
+    <color name="ink">#0E2033</color>
+    <color name="muted">#6C7F96</color>
+    <color name="primary">#0B6BFF</color>
+    <color name="primary_dark">#0647B8</color>
+    <color name="aqua">#21C4E8</color>
+    <color name="success">#12B76A</color>
+    <color name="danger">#F04438</color>
+    <color name="outline">#E1EBF7</color>
+    <color name="input">#F3F8FE</color>
+    <color name="log_bg">#081826</color>
+    <color name="log_text">#BDEBFF</color>
+    <color name="header_dark">#05254F</color>
+    <color name="white_70">#B3FFFFFF</color>
+    <color name="white_40">#66FFFFFF</color>
+    <color name="white_12">#1FFFFFFF</color>
+    <color name="amber">#FFD48A</color>
+    <color name="green_light">#8EF0C0</color>
+    <color name="badge_green_bg">#E7F9F0</color>
+</resources>

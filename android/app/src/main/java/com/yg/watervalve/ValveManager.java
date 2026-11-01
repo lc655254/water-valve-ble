@@ -27,6 +27,7 @@ public final class ValveManager {
         void onDevices(List<ScanItem> devices);
         void onQuery(Protocol.Query query);
         void onStats(String text);
+        void onConnection(boolean connected);
     }
 
     public static final class ScanItem {
@@ -87,6 +88,7 @@ public final class ValveManager {
         listener = l;
         notifyStats();
         notifySession();
+        notifyConnection(ble.isReady());
     }
     public Cloud.Session getSession() { return session; }
     public String getPhone() { return prefs.getString("phone", ""); }
@@ -94,6 +96,7 @@ public final class ValveManager {
     public String getDeviceName() { return deviceName; }
     public boolean isRunning() { return running; }
     public boolean isBusy() { return busy; }
+    public boolean isConnected() { return ble.isReady(); }
 
     public void savePhone(String phone) {
         prefs.edit().putString("phone", phone).apply();
@@ -567,6 +570,12 @@ public final class ValveManager {
         });
     }
 
+    private void notifyConnection(boolean connected) {
+        main.post(() -> {
+            if (listener != null) listener.onConnection(connected);
+        });
+    }
+
     private void refreshBalanceAndNotify() {
         if (session == null) return;
         try {
@@ -621,6 +630,7 @@ public final class ValveManager {
             if (!ok) {
                 log(msg);
                 setBusy(false, "");
+                notifyConnection(false);
             }
         }
 
@@ -638,6 +648,7 @@ public final class ValveManager {
                     saveDevice();
                 }
             });
+            notifyConnection(true);
             io.execute(() -> {
                 try {
                     queryInternal();
@@ -650,6 +661,7 @@ public final class ValveManager {
         @Override
         public void onDisconnected(String msg) {
             log(msg);
+            notifyConnection(false);
             if (running) log("警告：连接断开，阀门可能仍在出水；请靠近水表重连后关水");
         }
     };
