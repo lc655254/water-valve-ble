@@ -91,7 +91,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.1.0");
+        appendLog("安卓版启动，版本 0.1.1");
     }
 
     private void requestPerms() {
@@ -135,7 +135,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
         String who = s.userName == null || s.userName.isEmpty() ? s.telephone : s.userName;
         sessionStatus.setText("已登录：" + who + " · 项目 " + s.projectId);
-        balance.setText(s.balance == null || s.balance.isEmpty() ? "" : "余额：" + s.balance);
+        String bal = Cloud.fmtMoney(s.balance);
+        balance.setText(bal.isEmpty() ? "" : "余额：" + bal + " 元");
     }
 
     private void renderDevice() {

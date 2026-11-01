@@ -114,7 +114,7 @@ public final class ValveManager {
                 log("登录成功：" + (s.userName == null || s.userName.isEmpty()
                         ? s.telephone : s.userName)
                         + " · 项目 " + s.projectId
-                        + (s.balance.isEmpty() ? "" : " · 余额 " + s.balance));
+                        + (s.balance.isEmpty() ? "" : " · 余额 " + Cloud.fmtMoney(s.balance) + " 元"));
                 notifySession();
             } catch (Exception e) {
                 log("登录失败：" + msg(e));
@@ -500,8 +500,10 @@ public final class ValveManager {
 
         @Override
         public void onConnected(boolean ok, String msg) {
-            log(msg);
-            if (!ok) setBusy(false, "");
+            if (!ok) {
+                log(msg);
+                setBusy(false, "");
+            }
         }
 
         @Override
