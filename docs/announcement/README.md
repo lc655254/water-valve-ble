@@ -43,8 +43,11 @@ https://raw.githubusercontent.com/lc655254/water-valve-ble/main/docs/announcemen
 | `linkText` | 链接文字，默认“查看详情” |
 | `button` | 关闭按钮文字，默认“我知道了” |
 | `once` | `true` 同一 ID 只自动弹一次；`false` 每次启动都弹 |
-| `minVersionCode` | 最低 App versionCode，默认 0 |
-| `maxVersionCode` | 最高 App versionCode，默认 999999 |
+| `minVersionCode` | 最低 Android versionCode，默认 0 |
+| `maxVersionCode` | 最高 Android versionCode，默认 999999 |
+| `platforms` | 可选，`["android","pc"]`；不填则两端都显示 |
+| `minPcVersion` | 最低 Windows 版本，例如 `1.0.7` |
+| `maxPcVersion` | 最高 Windows 版本，默认不限 |
 
 ## 关闭公告
 
