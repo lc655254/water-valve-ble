@@ -233,7 +233,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         updateXiaolianButton();
         requestPerms();
-        appendLog("安卓版启动，版本 0.7.0");
+        appendLog("安卓版启动，版本 0.7.1");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -476,11 +476,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
         for (String url : info.images) {
             ImageView image = new ImageView(this);
-            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setAdjustViewBounds(true);
+            image.setMaxHeight(dp(360));
+            image.setScaleType(ImageView.ScaleType.FIT_CENTER);
             image.setBackgroundResource(R.drawable.bg_dialog_notes);
             image.setVisibility(View.GONE);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(180));
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.topMargin = dp(10);
             content.addView(image, lp);
             Announcement.loadImage(this, url, image);
