@@ -1,5 +1,5 @@
 ﻿#define MyAppName "蓝牙水库"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "lc655254"
 #define MyAppURL "https://github.com/lc655254/water-valve-ble"
 #define MyAppExeName "蓝牙水库安全版.exe"
@@ -32,7 +32,7 @@ LicenseFile=LICENSE.txt
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.0.3.0
+VersionInfoVersion=1.0.5.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoCompany={#MyAppPublisher}
@@ -64,3 +64,97 @@ Type: files; Name: "{app}\*.log"
 Type: files; Name: "{app}\valve_session.json"
 Type: files; Name: "{app}\valve_heartbeat"
 Type: files; Name: "{app}\valve_guard.pid"
+
+[Code]
+function ValveBusy(): Boolean;
+var
+  S: AnsiString;
+  J: String;
+begin
+  Result := False;
+  J := ExpandConstant('{app}\valve_session.json');
+  if FileExists(J) and LoadStringFromFile(J, S) then
+  begin
+    if (Pos('"state":"open"', S) > 0) or (Pos('"state": "open"', S) > 0) or
+       (Pos('"state":"opening"', S) > 0) or (Pos('"state": "opening"', S) > 0) or
+       (Pos('"state":"closing"', S) > 0) or (Pos('"state": "closing"', S) > 0) then
+      Result := True;
+  end;
+  if not Result then
+  begin
+    J := ExpandConstant('{localappdata}\蓝牙水库\valve_session.json');
+    if FileExists(J) and LoadStringFromFile(J, S) then
+    begin
+      if (Pos('"state":"open"', S) > 0) or (Pos('"state": "open"', S) > 0) or
+         (Pos('"state":"opening"', S) > 0) or (Pos('"state": "opening"', S) > 0) or
+         (Pos('"state":"closing"', S) > 0) or (Pos('"state": "closing"', S) > 0) then
+        Result := True;
+    end;
+  end;
+end;
+
+function AppProcessExists(): Boolean;
+var
+  R: Integer;
+begin
+  R := 0;
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if (Get-Process -Name ''蓝牙水库安全版'' -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"',
+       '', SW_HIDE, ewWaitUntilTerminated, R);
+  Result := (R = 1);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  R: Integer;
+begin
+  Result := '';
+  if ValveBusy() then
+  begin
+    Result := '水阀还在放水/结算，请先在程序里关水，再安装更新。';
+    Exit;
+  end;
+  Exec(ExpandConstant('{sys}\taskkill.exe'),
+       '/F /T /IM "蓝牙水库安全版.exe"', '', SW_HIDE,
+       ewWaitUntilTerminated, R);
+  if AppProcessExists() then
+  begin
+    ShellExec('runas', ExpandConstant('{sys}\taskkill.exe'),
+              '/F /T /IM "蓝牙水库安全版.exe"', '', SW_HIDE,
+              ewWaitUntilTerminated, R);
+    if AppProcessExists() then
+    begin
+      Result := '检测到以管理员身份运行的旧进程，无法自动结束。' +
+                '请以管理员身份打开任务管理器结束“蓝牙水库安全版.exe”，或重启电脑后再安装。';
+      Exit;
+    end;
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  R: Integer;
+begin
+  Result := True;
+  if ValveBusy() then
+  begin
+    MsgBox('水阀还在放水/结算，请先在程序里关水，再卸载。', mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  Exec(ExpandConstant('{sys}\taskkill.exe'),
+       '/F /T /IM "蓝牙水库安全版.exe"', '', SW_HIDE,
+       ewWaitUntilTerminated, R);
+  if AppProcessExists() then
+  begin
+    ShellExec('runas', ExpandConstant('{sys}\taskkill.exe'),
+              '/F /T /IM "蓝牙水库安全版.exe"', '', SW_HIDE,
+              ewWaitUntilTerminated, R);
+    if AppProcessExists() then
+    begin
+      MsgBox('检测到以管理员身份运行的旧进程。请先以管理员身份结束“蓝牙水库安全版.exe”，再卸载。',
+             mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;

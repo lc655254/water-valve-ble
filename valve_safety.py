@@ -197,6 +197,36 @@ def guard_running(d: str) -> bool:
     return pid_alive(pid)
 
 
+def stop_guard(d: str) -> bool:
+    """更新前停掉看门狗，避免它锁住 exe 导致安装包无法覆盖。"""
+    try:
+        with open(guard_pid_path(d), encoding="utf-8") as f:
+            pid = int((f.read() or "0").strip())
+    except Exception:
+        return False
+    if not pid_alive(pid):
+        try:
+            os.remove(guard_pid_path(d))
+        except Exception:
+            pass
+        return False
+    if IS_WIN:
+        try:
+            k = ctypes.windll.kernel32
+            PROCESS_TERMINATE = 0x0001
+            h = k.OpenProcess(PROCESS_TERMINATE, False, pid)
+            if h:
+                k.TerminateProcess(h, 1)
+                k.CloseHandle(h)
+        except Exception:
+            pass
+    try:
+        os.remove(guard_pid_path(d))
+    except Exception:
+        pass
+    return True
+
+
 def ensure_guard(d: str, log=print) -> bool:
     if not IS_WIN or os.environ.get("WV_NO_GUARD") == "1":
         return True

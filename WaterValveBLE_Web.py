@@ -41,6 +41,7 @@ if "--guard" in sys.argv:
 
 import WaterValveBLE_v4 as wv          # 复用 v4.6 业务逻辑（不启动它的命令行）
 import valve_safety as vsafety          # 防呆安全层：会话落盘 / 看门狗 / 关机拦截
+import valve_updater as updater          # GitHub Release 自动更新
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -68,6 +69,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
+APP_VERSION = "1.0.5"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -256,6 +258,10 @@ def set_result(action, ok, msg=""):
     ACT_RESULT.update(action=action, ok=bool(ok), msg=msg or "", ts=time.time())
 SESSION = {"s": None, "bal": None}       # 当前会话（dict）与钱包刷新出的余额（元）
 SAFETY = None                            # valve_safety.Safety，main() 里初始化
+UPDATE = {"state": "idle", "info": None, "check": None, "check_ts": 0.0,
+          "mirrors": [], "chosen": "", "downloaded": 0, "total": 0,
+          "speed": 0.0, "path": "", "error": ""}
+UPDATE_LOCK = threading.Lock()
 ACTIONS = {}                             # 动作去重时间戳（同一动作短时间内只受理一次）
 
 # 设备名：本地别名（自己起的名）+ 云端档案名（官方 App 同款接口）
@@ -994,6 +1000,7 @@ def snapshot():
         "water_running": WATER["running"],        # 出水状态：True 正在放水 / False 空闲 / None 未知
         "water_age": (int(time.time() - WATER["ts"]) if WATER["ts"] else None),
         "license": 9999,
+        "app_version": APP_VERSION,
         # 本地自用版：不再回填任何旧秘钥
         "last_key": "",
         "accounts": accounts,
@@ -1126,6 +1133,134 @@ def api_state():
 def api_copy():
     data = request.get_json(silent=True) or {}
     return jsonify({"ok": bool(copy_text(data.get("text", "")))})
+
+
+@app.route("/api/update/check")
+def api_update_check():
+    force = request.args.get("force") == "1"
+    now = time.time()
+    with UPDATE_LOCK:
+        cached = UPDATE.get("check")
+        ts = UPDATE.get("check_ts") or 0
+    if cached and not force and now - ts < 300:
+        return jsonify(cached)
+    try:
+        info = updater.check_latest()
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "msg": f"检查更新失败：{type(e).__name__}: {e}"})
+    has = updater.is_newer(info["version"], APP_VERSION)
+    res = {"ok": True, "current": APP_VERSION, "latest": info["version"],
+           "tag": info["tag"], "has_update": has,
+           "notes": info.get("notes") or "",
+           "asset": info.get("asset") or "",
+           "size": info.get("size") or 0,
+           "digest": info.get("digest") or "",
+           "published": info.get("published") or ""}
+    with UPDATE_LOCK:
+        UPDATE["info"] = info
+        UPDATE["check"] = res
+        UPDATE["check_ts"] = now
+    return jsonify(res)
+
+
+@app.route("/api/update/download", methods=["POST"])
+def api_update_download():
+    with UPDATE_LOCK:
+        if UPDATE["state"] in ("testing", "downloading"):
+            return jsonify({"ok": True, "already": True})
+        info = UPDATE.get("info")
+        if UPDATE["state"] == "done" and UPDATE.get("path") \
+                and os.path.exists(UPDATE["path"]):
+            return jsonify({"ok": True, "already": True})
+    if not info:
+        return jsonify({"ok": False, "msg": "请先检查更新"})
+    if not updater.is_newer(info["version"], APP_VERSION):
+        return jsonify({"ok": False, "msg": "当前已是最新版本"})
+    if not info.get("digest"):
+        return jsonify({"ok": False, "msg": "Release 缺少 SHA256，拒绝自动更新"})
+    dest = os.path.join(updater.update_dir(), os.path.basename(info["asset"]))
+    with UPDATE_LOCK:
+        UPDATE.update(state="testing", error="", mirrors=[], chosen="",
+                      downloaded=0, total=info.get("size") or 0,
+                      speed=0.0, path="")
+
+    def work():
+        try:
+            def on_mirrors(rs):
+                with UPDATE_LOCK:
+                    UPDATE["mirrors"] = rs
+
+            def on_progress(done, total, speed, label):
+                with UPDATE_LOCK:
+                    UPDATE.update(state="downloading", downloaded=done,
+                                  total=total or (info.get("size") or 0),
+                                  speed=speed, chosen=label)
+
+            path = updater.download_best(info, dest, on_progress, on_mirrors)
+            with UPDATE_LOCK:
+                UPDATE.update(state="done", path=path,
+                              downloaded=os.path.getsize(path),
+                              total=os.path.getsize(path), speed=0.0)
+        except Exception as e:  # noqa: BLE001
+            with UPDATE_LOCK:
+                UPDATE.update(state="error", error=f"{type(e).__name__}: {e}")
+
+    threading.Thread(target=work, daemon=True, name="wv-update").start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/update/status")
+def api_update_status():
+    with UPDATE_LOCK:
+        d = dict(UPDATE)
+        d.pop("info", None)
+        d.pop("check", None)
+        d["current"] = APP_VERSION
+        d["path_ready"] = bool(d.get("path") and os.path.exists(d["path"]))
+        d["total"] = int(d.get("total") or 0)
+        d["downloaded"] = int(d.get("downloaded") or 0)
+        d["speed"] = round(float(d.get("speed") or 0), 1)
+    return jsonify(d)
+
+
+@app.route("/api/update/install", methods=["POST"])
+def api_update_install():
+    with UPDATE_LOCK:
+        st = UPDATE.get("state")
+        path = UPDATE.get("path") or ""
+        info = UPDATE.get("info") or {}
+    if st != "done" or not path or not os.path.exists(path):
+        return jsonify({"ok": False, "msg": "更新包还没下载完"})
+    if WATER.get("running") is True or wv.pending_read():
+        return jsonify({"ok": False, "msg": "水阀还在放水/结算，请先关水再更新"})
+    if SAFETY and SAFETY.needs_close_now():
+        return jsonify({"ok": False, "msg": "水阀还没收尾，请先关水再更新"})
+    digest = (info.get("digest") or "").lower()
+    if digest and updater.sha256_file(path) != digest:
+        return jsonify({"ok": False, "msg": "更新包 SHA256 校验失败，请重新下载"})
+    frozen = bool(getattr(sys, "frozen", False))
+    app_dir = os.path.dirname(sys.executable) if frozen else HERE
+    app_exe = sys.executable
+    script = None
+    if not frozen:
+        if app_exe.lower().endswith("python.exe"):
+            p = app_exe[:-10] + "pythonw.exe"
+            if os.path.exists(p):
+                app_exe = p
+        script = os.path.join(HERE, "WaterValveBLE_Web.py")
+    try:
+        if SAFETY:
+            SAFETY._stop.set()
+            SAFETY.enabled = False
+        vsafety.stop_guard(wv._data_dir())
+    except Exception:
+        pass
+    try:
+        updater.make_install_script(path, app_dir, app_exe, script)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "msg": f"启动安装器失败：{type(e).__name__}: {e}"})
+    threading.Timer(1.0, lambda: os._exit(0)).start()
+    return jsonify({"ok": True, "msg": "正在退出并安装，完成后会自动重启"})
 
 
 @app.route("/api/logs")
