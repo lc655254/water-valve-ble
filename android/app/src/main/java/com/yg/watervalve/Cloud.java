@@ -1,0 +1,245 @@
+package com.yg.watervalve;
+
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/** 凯路云接口：短信登录、BLE 下单、零用量流水上传。 */
+public final class Cloud {
+    public static final String BASE = "https://v3-api.china-qzxy.cn";
+    private static final String UA = "okhttp/4.2.2";
+    private static final int BIG_TYPE_ID = 4;
+    private static final int SMALL_TYPE_ID = 1;
+
+    private Cloud() {}
+
+    public static String smsSecret(String phone) {
+        return Protocol.md5(phone.substring(0, 3) + phone.substring(7) + "klcx");
+    }
+
+    public static void sendSms(String phone) throws Exception {
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("phoneSystem", "ios");
+        p.put("platform", "1");
+        p.put("secret", smsSecret(phone));
+        p.put("telephone", phone);
+        p.put("typeId", "3");
+        p.put("version", "6.5.26");
+        JSONObject d = get("/user/verification/code/get", p);
+        int code = d.optInt("errorCode", -1);
+        if (code != 0) throw new ApiException(code, d.optString("errorMessage", "发码失败"));
+    }
+
+    public static Session loginByCode(String phone, String smsCode) throws Exception {
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("phoneSystem", "ios");
+        p.put("smsCode", smsCode);
+        p.put("telephone", phone);
+        p.put("type", "5");
+        p.put("version", "6.5.26");
+        JSONObject d = postForm("/user/registerAndLogin", p);
+        int code = d.optInt("errorCode", -1);
+        if (code != 0) throw new ApiException(code, d.optString("errorMessage", "登录失败"));
+        JSONObject data = d.getJSONObject("data");
+        JSONObject ua = data.getJSONObject("userAccount");
+        Session s = new Session();
+        s.loginCode = data.optString("loginCode", "");
+        s.userId = data.optString("userId", "");
+        s.projectId = ua.optString("projectId", "");
+        s.accountId = ua.optString("accountId", "");
+        s.telephone = data.optString("telephone", phone);
+        s.userName = ua.optString("name", "");
+        s.balance = ua.optString("accountRealMoney", "");
+        if (s.loginCode.isEmpty() || s.userId.isEmpty()) {
+            throw new ApiException(-1, "登录返回缺少 loginCode/userId");
+        }
+        return s;
+    }
+
+    public static RateOrder rateOrder(Session s, int deviceId, String randomNumber,
+                                      String commMode, String mac) throws Exception {
+        String sig = Protocol.signature(
+                "deviceId" + deviceId + "randomNumber" + randomNumber
+                        + "telephone" + s.telephone + "xfModel0", s.loginCode);
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("xfModel", "0");
+        p.put("loginCode", s.loginCode);
+        p.put("protocolType", commMode);
+        p.put("randomNumber", randomNumber);
+        p.put("projectId", s.projectId);
+        p.put("orderAuthCode", "ble_" + System.currentTimeMillis());
+        p.put("deviceId", String.valueOf(deviceId));
+        p.put("smallTypeId", String.valueOf(SMALL_TYPE_ID));
+        p.put("signature", sig);
+        p.put("telephone", s.telephone);
+        p.put("macAddress", mac);
+        p.put("bigTypeId", String.valueOf(BIG_TYPE_ID));
+        p.put("userId", s.userId);
+        p.put("accountId", s.accountId);
+        JSONObject d = postForm("/order/ali/downRate/bluetooth/rateOrder", p);
+        int code = d.optInt("errorCode", -1);
+        if (code != 0) throw new ApiException(code, d.optString("errorMessage", "下单失败"));
+        JSONObject data = d.optJSONObject("data");
+        RateOrder r = new RateOrder();
+        if (data != null) {
+            r.downData = data.optString("downData", "");
+            r.rate = data.optInt("rate", 0);
+            r.raw = data.toString();
+        }
+        if (r.downData.isEmpty()) throw new ApiException(-1, "云端没有返回 downData");
+        return r;
+    }
+
+    public static String upload(Session s, String xfData, String randomNumber,
+                                String commMode) throws Exception {
+        String sig = Protocol.signature(
+                "loginCode" + s.loginCode + "telephone" + s.telephone
+                        + "xfData" + xfData, s.loginCode);
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("loginCode", s.loginCode);
+        p.put("protocolType", commMode);
+        p.put("telephone", s.telephone);
+        p.put("userId", s.userId);
+        p.put("accountId", s.accountId);
+        p.put("xfData", xfData);
+        p.put("randomNumber", randomNumber);
+        p.put("signature", sig);
+        p.put("projectId", s.projectId);
+        for (int i = 0; i < 3; i++) {
+            JSONObject d = postForm("/order/upload/bluetooth/data", p);
+            int code = d.optInt("errorCode", -1);
+            if (code == 531) {
+                Thread.sleep(3000L + i * 3000L);
+                continue;
+            }
+            if (code != 0 && code != 206 && code != 7) {
+                throw new ApiException(code, d.optString("errorMessage", "上传失败"));
+            }
+            JSONObject data = d.optJSONObject("data");
+            return data == null ? null : data.optString("clData", null);
+        }
+        throw new ApiException(531, "上传连续被限流");
+    }
+
+    private static JSONObject get(String path, Map<String, String> params) throws Exception {
+        StringBuilder q = new StringBuilder();
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(URLEncoder.encode(e.getKey(), "UTF-8"));
+            q.append('=');
+            q.append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), "UTF-8"));
+        }
+        String url = BASE + path + (q.length() > 0 ? "?" + q : "");
+        return request("GET", url, null);
+    }
+
+    private static JSONObject postForm(String path, Map<String, String> params) throws Exception {
+        StringBuilder body = new StringBuilder();
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (body.length() > 0) body.append('&');
+            body.append(URLEncoder.encode(e.getKey(), "UTF-8"));
+            body.append('=');
+            body.append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), "UTF-8"));
+        }
+        return request("POST", BASE + path, body.toString());
+    }
+
+    private static JSONObject request(String method, String url, String body) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(20000);
+        c.setReadTimeout(20000);
+        c.setRequestMethod(method);
+        c.setRequestProperty("User-Agent", UA);
+        c.setRequestProperty("Accept", "application/json");
+        if ("POST".equals(method)) {
+            byte[] b = (body == null ? "" : body).getBytes(StandardCharsets.UTF_8);
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type",
+                    "application/x-www-form-urlencoded; charset=UTF-8");
+            c.setFixedLengthStreamingMode(b.length);
+            try (OutputStream os = c.getOutputStream()) {
+                os.write(b);
+            }
+        }
+        int code = c.getResponseCode();
+        InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+        StringBuilder sb = new StringBuilder();
+        if (is != null) {
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                char[] buf = new char[2048];
+                int n;
+                while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+            }
+        }
+        c.disconnect();
+        if (sb.length() == 0) throw new ApiException(code, "云端返回空响应 HTTP " + code);
+        return new JSONObject(sb.toString());
+    }
+
+    public static final class ApiException extends Exception {
+        public final int code;
+        public ApiException(int code, String msg) {
+            super(msg == null || msg.isEmpty() ? ("errorCode=" + code) : msg);
+            this.code = code;
+        }
+    }
+
+    public static final class RateOrder {
+        public String downData = "";
+        public int rate;
+        public String raw = "";
+    }
+
+    public static final class Session {
+        public String loginCode = "";
+        public String userId = "";
+        public String projectId = "";
+        public String accountId = "";
+        public String telephone = "";
+        public String userName = "";
+        public String balance = "";
+
+        public JSONObject toJson() {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("loginCode", loginCode);
+                o.put("userId", userId);
+                o.put("projectId", projectId);
+                o.put("accountId", accountId);
+                o.put("telephone", telephone);
+                o.put("userName", userName);
+                o.put("balance", balance);
+            } catch (Exception ignored) {
+            }
+            return o;
+        }
+
+        public static Session fromJson(String raw) {
+            if (raw == null || raw.isEmpty()) return null;
+            try {
+                JSONObject o = new JSONObject(raw);
+                Session s = new Session();
+                s.loginCode = o.optString("loginCode", "");
+                s.userId = o.optString("userId", "");
+                s.projectId = o.optString("projectId", "");
+                s.accountId = o.optString("accountId", "");
+                s.telephone = o.optString("telephone", "");
+                s.userName = o.optString("userName", "");
+                s.balance = o.optString("balance", "");
+                return s.loginCode.isEmpty() ? null : s;
+            } catch (Exception e) {
+                return null;
+            }
+        }
+    }
+}
