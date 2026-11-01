@@ -175,6 +175,16 @@
                     android:textColor="@color/primary"
                     android:textSize="13sp" />
 
+                <TextView
+                    android:id="@+id/btnXiaolian"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="同步官方宿舍名"
+                    android:textColor="@color/primary"
+                    android:textSize="11sp" />
+
                 <LinearLayout
                     android:id="@+id/loginFields"
                     android:layout_width="match_parent"

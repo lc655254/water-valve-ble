@@ -40,18 +40,25 @@ public final class ValveManager {
         public final int rssi;
         public final boolean bound;
         public final boolean cloudChecked;
+        public final boolean official;
 
         public ScanItem(BluetoothDevice device, String name, int rssi) {
-            this(device, name, rssi, false, false);
+            this(device, name, rssi, false, false, false);
         }
 
         public ScanItem(BluetoothDevice device, String name, int rssi,
                         boolean bound, boolean cloudChecked) {
+            this(device, name, rssi, bound, cloudChecked, false);
+        }
+
+        public ScanItem(BluetoothDevice device, String name, int rssi,
+                        boolean bound, boolean cloudChecked, boolean official) {
             this.device = device;
             this.name = name;
             this.rssi = rssi;
             this.bound = bound;
             this.cloudChecked = cloudChecked;
+            this.official = official;
         }
     }
 
@@ -72,6 +79,7 @@ public final class ValveManager {
     private final List<ScanItem> devices = new ArrayList<>();
     private final Set<String> cloudLooked = new HashSet<>();
     private final Set<String> cloudChecked = new HashSet<>();
+    private final Set<String> officialLooked = new HashSet<>();
     private static final String GENERIC_NAME = "KLCXKJ 水表";
     private Listener listener;
     private Cloud.Session session;
@@ -191,6 +199,7 @@ public final class ValveManager {
             devices.clear();
             cloudLooked.clear();
             cloudChecked.clear();
+            officialLooked.clear();
             notifyDevices();
         });
         io.execute(() -> ble.startScan());
@@ -704,6 +713,70 @@ public final class ValveManager {
         return Math.round(v * 10000.0) / 10000.0;
     }
 
+    public void refreshOfficialNames() {
+        if (!Xiaolian.hasToken(context)) return;
+        main.post(() -> {
+            final List<String> addrs = new ArrayList<>();
+            for (ScanItem it : devices) {
+                String a = addressOf(it.device);
+                if (!a.isEmpty()) addrs.add(a);
+            }
+            if (bleAddr != null && !bleAddr.isEmpty()) addrs.add(bleAddr);
+            if (addrs.isEmpty()) return;
+            nameIo.execute(() -> {
+                for (String a : addrs) lookupOfficialFor(a);
+            });
+        });
+    }
+
+    private void lookupOfficialFor(String addr) {
+        if (addr == null || addr.isEmpty() || !Xiaolian.hasToken(context)) return;
+        if (!knownCloud(addr).isEmpty()) return;
+        String n = Xiaolian.deviceName(context, addr);
+        if (n == null || n.trim().isEmpty()) return;
+        final String name = n.trim();
+        rememberOfficial(addr, name);
+        main.post(() -> {
+            updateOfficialName(addr, name);
+            if (addr.equalsIgnoreCase(bleAddr) && knownCloud(addr).isEmpty()) {
+                deviceName = name;
+                saveDevice();
+                if (listener != null) listener.onConnection(ble.isReady());
+            }
+            notifyDevices();
+        });
+    }
+
+    private String knownOfficial(String addr) {
+        if (addr == null || addr.isEmpty()) return "";
+        return prefs.getString("xlname:" + addr.toLowerCase(Locale.ROOT), "");
+    }
+
+    private void rememberOfficial(String addr, String name) {
+        if (addr == null || addr.isEmpty() || name == null || name.isEmpty()) return;
+        prefs.edit().putString("xlname:" + addr.toLowerCase(Locale.ROOT), name).apply();
+    }
+
+    private void updateOfficialName(String addr, String name) {
+        if (addr == null || addr.isEmpty() || name == null || name.isEmpty()) return;
+        boolean changed = false;
+        for (int i = 0; i < devices.size(); i++) {
+            ScanItem it = devices.get(i);
+            if (addr.equalsIgnoreCase(addressOf(it.device))) {
+                if (!name.equals(it.name) || !it.official) {
+                    devices.set(i, new ScanItem(it.device, name, it.rssi,
+                            it.bound, it.cloudChecked, true));
+                    changed = true;
+                }
+                break;
+            }
+        }
+        if (changed) {
+            sortDevices();
+            notifyDevices();
+        }
+    }
+
     private void lookupExistingDevices() {
         main.post(() -> {
             final List<String> addrs = new ArrayList<>();
@@ -770,7 +843,8 @@ public final class ValveManager {
             ScanItem it = devices.get(i);
             if (addr.equalsIgnoreCase(addressOf(it.device))) {
                 if (it.bound || !it.cloudChecked) {
-                    devices.set(i, new ScanItem(it.device, it.name, it.rssi, false, true));
+                    devices.set(i, new ScanItem(it.device, it.name, it.rssi,
+                            false, true, it.official));
                     changed = true;
                 }
                 break;
@@ -816,7 +890,7 @@ public final class ValveManager {
             if (addr.equalsIgnoreCase(addressOf(it.device))) {
                 if (!name.equals(it.name)) {
                     devices.set(i, new ScanItem(it.device, name, it.rssi,
-                            it.bound, it.cloudChecked));
+                            it.bound, it.cloudChecked, it.official));
                     changed = true;
                 }
                 break;
@@ -835,7 +909,8 @@ public final class ValveManager {
             ScanItem it = devices.get(i);
             if (addr.equalsIgnoreCase(addressOf(it.device))) {
                 if (!name.equals(it.name) || it.bound != bound || it.cloudChecked != checked) {
-                    devices.set(i, new ScanItem(it.device, name, it.rssi, bound, checked));
+                    devices.set(i, new ScanItem(it.device, name, it.rssi,
+                            bound, checked, it.official));
                     changed = true;
                 }
                 break;
@@ -850,6 +925,7 @@ public final class ValveManager {
     private void sortDevices() {
         devices.sort((a, b) -> {
             if (a.bound != b.bound) return a.bound ? -1 : 1;
+            if (a.official != b.official) return a.official ? -1 : 1;
             return Integer.compare(b.rssi, a.rssi);
         });
     }
@@ -862,6 +938,33 @@ public final class ValveManager {
         } catch (SecurityException e) {
             return "";
         }
+    }
+
+    public void clearOfficialCache() {
+        android.content.SharedPreferences.Editor ed = prefs.edit();
+        for (String k : new ArrayList<>(prefs.getAll().keySet())) {
+            if (k.startsWith("xlname:")) ed.remove(k);
+        }
+        ed.apply();
+        officialLooked.clear();
+        main.post(() -> {
+            for (int i = 0; i < devices.size(); i++) {
+                ScanItem it = devices.get(i);
+                if (it.official) {
+                    devices.set(i, new ScanItem(it.device, GENERIC_NAME, it.rssi,
+                            it.bound, it.cloudChecked, false));
+                }
+            }
+            String n = ble.getSelectedName();
+            if (n == null || n.isEmpty()) n = GENERIC_NAME;
+            if (bleAddr != null && !bleAddr.isEmpty() && knownCloud(bleAddr).isEmpty()) {
+                deviceName = n;
+                saveDevice();
+            }
+            sortDevices();
+            notifyDevices();
+            if (listener != null) listener.onConnection(ble.isReady());
+        });
     }
 
     private void saveSafety() {
@@ -1029,10 +1132,13 @@ public final class ValveManager {
                 String actual = name == null ? "" : name.trim();
                 if (!actual.isEmpty()) rememberName(addr, actual);
                 String cloud = knownCloud(addr);
+                String official = knownOfficial(addr);
                 boolean bound = !cloud.isEmpty();
                 boolean checked = bound || cloudChecked.contains(addr);
+                boolean isOfficial = !official.isEmpty();
                 String nm;
                 if (!cloud.isEmpty()) nm = cloud;
+                else if (!official.isEmpty()) nm = official;
                 else if (!actual.isEmpty()) nm = actual;
                 else nm = knownName(addr);
                 if (nm == null || nm.isEmpty()) nm = GENERIC_NAME;
@@ -1051,15 +1157,23 @@ public final class ValveManager {
                     }
                     bound = bound || old.bound;
                     checked = checked || old.cloudChecked;
+                    isOfficial = isOfficial || old.official;
                     boolean changed = old.name == null || !old.name.equals(nm)
-                            || old.bound != bound || old.cloudChecked != checked;
-                    devices.set(idx, new ScanItem(device, nm, rssi, bound, checked));
+                            || old.bound != bound || old.cloudChecked != checked
+                            || old.official != isOfficial;
+                    devices.set(idx, new ScanItem(device, nm, rssi, bound, checked, isOfficial));
                     sortDevices();
                     if (changed) notifyDevices();
                 } else {
-                    devices.add(new ScanItem(device, nm, rssi, bound, checked));
+                    devices.add(new ScanItem(device, nm, rssi, bound, checked, isOfficial));
                     sortDevices();
                     notifyDevices();
+                }
+                if (Xiaolian.hasToken(context) && !addr.isEmpty()
+                        && !isOfficial && !officialLooked.contains(addr)) {
+                    officialLooked.add(addr);
+                    final String a = addr;
+                    nameIo.execute(() -> lookupOfficialFor(a));
                 }
                 if (session != null && !addr.isEmpty() && !cloudLooked.contains(addr)) {
                     cloudLooked.add(addr);

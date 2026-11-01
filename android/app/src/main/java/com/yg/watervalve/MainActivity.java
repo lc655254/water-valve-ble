@@ -20,6 +20,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -54,6 +55,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater;
     private TextView btnCopyLog;
     private TextView btnCheckUpdate;
+    private TextView btnXiaolian;
     private LinearLayout deviceList, header, bottomBar, loginFields, logBody;
     private ScrollView logScroll;
     private View statusBarScrim, root;
@@ -100,6 +102,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnWater = findViewById(R.id.btnWater);
         btnCopyLog = findViewById(R.id.btnCopyLog);
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate);
+        btnXiaolian = findViewById(R.id.btnXiaolian);
         deviceList = findViewById(R.id.deviceList);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
@@ -216,9 +219,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 checkUpdate(false);
             }
         });
+        btnXiaolian.setOnClickListener(v -> {
+            tap(v);
+            showXiaolianDialog();
+        });
+        updateXiaolianButton();
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.5.3");
+        appendLog("安卓版启动，版本 0.6.0");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -228,6 +236,165 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
+    }
+
+    private void updateXiaolianButton() {
+        if (btnXiaolian == null) return;
+        btnXiaolian.setText(Xiaolian.hasToken(this)
+                ? "官方宿舍名已同步 · 重新登录"
+                : "同步官方宿舍名");
+    }
+
+    private void showXiaolianDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(16));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+
+        TextView title = new TextView(this);
+        title.setText("同步官方宿舍名");
+        title.setTextSize(20);
+        title.setTextColor(getColor(R.color.ink));
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        box.addView(title);
+
+        TextView hint = new TextView(this);
+        hint.setText("使用智慧笑联账号登录，按 MAC 查询学校设备库。只保存 token，不保存密码。");
+        hint.setTextSize(11);
+        hint.setTextColor(getColor(R.color.muted));
+        hint.setLineSpacing(dp(2), 1f);
+        hint.setPadding(0, dp(6), 0, dp(12));
+        box.addView(hint);
+
+        EditText phoneInput = new EditText(this);
+        phoneInput.setHint("笑联手机号");
+        phoneInput.setText(manager.getPhone());
+        phoneInput.setTextSize(14);
+        phoneInput.setSingleLine(true);
+        phoneInput.setInputType(InputType.TYPE_CLASS_PHONE);
+        phoneInput.setTextColor(getColor(R.color.ink));
+        phoneInput.setHintTextColor(getColor(R.color.muted));
+        phoneInput.setBackgroundResource(R.drawable.bg_input);
+        phoneInput.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        box.addView(phoneInput, plp);
+
+        EditText pwdInput = new EditText(this);
+        pwdInput.setHint("笑联登录密码");
+        pwdInput.setTextSize(14);
+        pwdInput.setSingleLine(true);
+        pwdInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        pwdInput.setTextColor(getColor(R.color.ink));
+        pwdInput.setHintTextColor(getColor(R.color.muted));
+        pwdInput.setBackgroundResource(R.drawable.bg_input);
+        pwdInput.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        wlp.topMargin = dp(8);
+        box.addView(pwdInput, wlp);
+
+        TextView error = new TextView(this);
+        error.setTextSize(11);
+        error.setTextColor(getColor(R.color.danger));
+        error.setPadding(0, dp(8), 0, 0);
+        error.setVisibility(View.GONE);
+        box.addView(error);
+
+        Button login = new Button(this);
+        login.setText("登录并同步");
+        login.setAllCaps(false);
+        login.setTextSize(14);
+        login.setTextColor(Color.WHITE);
+        login.setBackgroundResource(R.drawable.bg_button_primary);
+        login.setStateListAnimator(null);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50));
+        blp.topMargin = dp(12);
+        box.addView(login, blp);
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(12);
+        cancel.setTextColor(getColor(R.color.primary));
+        cancel.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+        clp.topMargin = dp(2);
+        box.addView(cancel, clp);
+
+        TextView clear = null;
+        if (Xiaolian.hasToken(this)) {
+            clear = new TextView(this);
+            clear.setText("清除已同步名称");
+            clear.setTextSize(11);
+            clear.setTextColor(getColor(R.color.muted));
+            clear.setGravity(Gravity.CENTER);
+            box.addView(clear, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(32)));
+        }
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(box);
+        dialog.setCanceledOnTouchOutside(true);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        login.setOnClickListener(v -> {
+            String p = phoneInput.getText().toString().trim();
+            String pw = pwdInput.getText().toString();
+            if (p.length() != 11 || pw.isEmpty()) {
+                error.setText("请输入 11 位手机号和笑联密码");
+                error.setVisibility(View.VISIBLE);
+                return;
+            }
+            tap(v);
+            login.setEnabled(false);
+            login.setText("登录中…");
+            error.setVisibility(View.GONE);
+            new Thread(() -> {
+                Xiaolian.LoginResult r = Xiaolian.login(MainActivity.this, p, pw);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (r.ok) {
+                        updateXiaolianButton();
+                        dialog.dismiss();
+                        toast(r.message);
+                        manager.refreshOfficialNames();
+                    } else {
+                        login.setEnabled(true);
+                        login.setText("登录并同步");
+                        error.setText(r.message);
+                        error.setVisibility(View.VISIBLE);
+                    }
+                });
+            }, "xiaolian-login").start();
+        });
+        if (clear != null) {
+            final TextView clearRef = clear;
+            clearRef.setOnClickListener(v -> {
+                Xiaolian.clear(this);
+                manager.clearOfficialCache();
+                updateXiaolianButton();
+                clearRef.setVisibility(View.GONE);
+                toast("已清除官方名称");
+            });
+        }
+        dialog.show();
+        Window dw = dialog.getWindow();
+        if (dw != null) {
+            dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dw.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dw.setDimAmount(0.35f);
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
+            dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        box.setAlpha(0f);
+        box.setScaleX(0.96f);
+        box.setScaleY(0.96f);
+        box.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(180).setInterpolator(new DecelerateInterpolator()).start();
     }
 
     private void checkUpdate(boolean silent) {
@@ -691,6 +858,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 detail = addr + "   " + item.rssi + " dBm";
                 tv.setTextColor(getColor(R.color.primary));
                 tv.setBackgroundResource(R.drawable.bg_device_item_bound);
+            } else if (item.official) {
+                title = name;
+                detail = "附近水表 · " + addr + "   " + item.rssi + " dBm";
+                tv.setTextColor(getColor(R.color.ink));
+                tv.setBackgroundResource(R.drawable.bg_device_item);
             } else {
                 title = item.cloudChecked ? "附近水表（未绑定）" : "附近水表";
                 detail = name + " · " + addr + "   " + item.rssi + " dBm";
@@ -710,7 +882,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             tv.setOnClickListener(v -> {
                 tap(v);
                 if (!item.bound && item.cloudChecked) {
-                    toast("这是附近未绑定水表，开阀前请确认不是别人的表");
+                    toast("这是附近水表，开阀前请确认不是别人的表");
                 }
                 manager.connect(item);
             });
@@ -784,7 +956,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void setupInteractions() {
         View[] press = {btnWater, btnScan, btnQuery, btnLogin, btnSendCode,
-                btnCopyLog, btnToggleLogin, btnToggleLog, btnCheckUpdate};
+                btnCopyLog, btnToggleLogin, btnToggleLog, btnCheckUpdate, btnXiaolian};
         for (View v : press) pressScale(v);
         scroll.setOnScrollChangeListener((v, sx, sy, oldX, oldY) -> {
             float t = Math.min(1f, sy / (float) dp(140));
