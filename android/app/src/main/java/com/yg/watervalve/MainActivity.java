@@ -2,6 +2,8 @@ package com.yg.watervalve;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -9,6 +11,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -23,6 +27,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -37,6 +42,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private TextView statLastMain, statLastSub, statTotalMain, statTotalSub;
     private EditText phone, code;
     private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater, btnCopyLog;
+    private TextView btnCheckUpdate;
     private LinearLayout deviceList, header, bottomBar;
     private ScrollView logScroll;
     private View statusBarScrim, root;
@@ -44,6 +50,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.CHINA);
     private boolean running;
     private boolean connected;
+    private ProgressDialog updateProgress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,6 +77,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnQuery = findViewById(R.id.btnQuery);
         btnWater = findViewById(R.id.btnWater);
         btnCopyLog = findViewById(R.id.btnCopyLog);
+        btnCheckUpdate = findViewById(R.id.btnCheckUpdate);
         deviceList = findViewById(R.id.deviceList);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
@@ -92,6 +100,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         updateHeader();
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+        if (manager.hasOpenSession() && !manager.isConnected()) {
+            ValveService.startRecover(this);
+            manager.recoverIfOpen(false);
         }
 
         btnSendCode.setOnClickListener(v -> {
@@ -127,9 +139,114 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 toast("日志已复制");
             }
         });
+        btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
+        btnCheckUpdate.setOnClickListener(v -> checkUpdate(false));
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.2.0");
+        appendLog("安卓版启动，版本 0.3.0");
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (!isFinishing()) checkUpdate(true);
+        }, 4000);
+    }
+
+    private void checkUpdate(boolean silent) {
+        if (manager.isRunning() || manager.hasOpenSession()) {
+            if (!silent) toast("放水中，先关水再检查更新");
+            return;
+        }
+        btnCheckUpdate.setText("检查中…");
+        Updater.check(this, (info, error) -> {
+            btnCheckUpdate.setText("v" + Updater.currentVersion(this) + " · 检查更新");
+            if (error != null) {
+                if (!silent) toast("检查更新失败：" + error);
+                return;
+            }
+            if (info == null || !info.hasUpdate) {
+                if (!silent) toast("已是最新版本 v" + Updater.currentVersion(this));
+                return;
+            }
+            showUpdateDialog(info);
+        });
+    }
+
+    private void showUpdateDialog(Updater.Info info) {
+        if (manager.isRunning() || manager.hasOpenSession()) {
+            toast("放水中，先关水再更新");
+            return;
+        }
+        String notes = info.notes == null ? "" : info.notes.trim();
+        if (notes.length() > 600) notes = notes.substring(0, 600) + "…";
+        String msg = "当前版本 v" + Updater.currentVersion(this)
+                + "\n新版本 v" + info.version + " · " + mb(info.size)
+                + (notes.isEmpty() ? "" : "\n\n" + notes);
+        new AlertDialog.Builder(this)
+                .setTitle("发现新版本")
+                .setMessage(msg)
+                .setPositiveButton("下载并安装", (d, w) -> {
+                    if (!Updater.canInstall(this)) {
+                        Updater.openInstallSettings(this);
+                        toast("请允许安装未知应用后再试");
+                        return;
+                    }
+                    downloadUpdate(info);
+                })
+                .setNegativeButton("稍后", null)
+                .show();
+    }
+
+    private void downloadUpdate(Updater.Info info) {
+        if (manager.isRunning() || manager.hasOpenSession()) {
+            toast("放水中，先关水再下载更新");
+            return;
+        }
+        if (updateProgress != null) updateProgress.dismiss();
+        updateProgress = new ProgressDialog(this);
+        updateProgress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        updateProgress.setMax(100);
+        updateProgress.setCancelable(false);
+        updateProgress.setMessage("下载中…");
+        updateProgress.show();
+        Updater.download(this, info,
+                (pct, bytes, total) -> runOnUiThread(() -> {
+                    if (updateProgress == null) return;
+                    updateProgress.setProgress(pct);
+                    updateProgress.setMessage("下载中… " + pct + "%");
+                }),
+                (file, error) -> runOnUiThread(() -> {
+                    if (updateProgress != null) {
+                        updateProgress.dismiss();
+                        updateProgress = null;
+                    }
+                    if (error != null) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("更新下载失败")
+                                .setMessage(error)
+                                .setPositiveButton("知道了", null)
+                                .show();
+                        return;
+                    }
+                    installUpdate(file);
+                }));
+    }
+
+    private void installUpdate(File file) {
+        if (manager.isRunning() || manager.hasOpenSession()) {
+            toast("放水中，先关水再安装更新");
+            return;
+        }
+        try {
+            Updater.install(this, file);
+            toast("已交给系统安装，请点“更新”");
+        } catch (SecurityException e) {
+            Updater.openInstallSettings(this);
+            toast("请允许安装未知应用后再试");
+        } catch (Exception e) {
+            toast("安装失败：" + e.getMessage());
+        }
+    }
+
+    private String mb(long bytes) {
+        return String.format(Locale.CHINA, "%.1f MB", bytes / 1048576.0);
     }
 
     private void setupWindow() {
@@ -380,6 +497,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     protected void onDestroy() {
         manager.setListener(null);
+        if (updateProgress != null) {
+            updateProgress.dismiss();
+            updateProgress = null;
+        }
         super.onDestroy();
     }
 
