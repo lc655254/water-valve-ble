@@ -262,10 +262,11 @@ select{cursor:pointer}
 
 /* ── 弹窗 ── */
 .mask{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);
-  display:none;place-items:center;z-index:300;padding:14px;box-sizing:border-box;overflow:auto}
-.mask.show{display:grid}
+  display:none;align-items:center;justify-content:center;z-index:300;padding:14px;
+  box-sizing:border-box;overflow:auto}
+.mask.show{display:flex}
 .dialog{width:380px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px;
+  border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px;margin:auto;
   /* 内容再长也不会把标题/按钮顶出屏幕：弹窗自身限高，正文区滚动 */
   max-height:calc(100vh - 28px);display:flex;flex-direction:column;overflow:hidden;
   animation:pop .18s var(--ease)}
@@ -280,6 +281,7 @@ select{cursor:pointer}
 .dialog.ann .annimg{max-height:420px;margin:14px auto 2px}
 /* 省钱账本：加宽、放大卡片、放松行距 */
 .dialog.stats{width:720px;max-width:calc(100vw - 32px)}
+.dialog.stats #mBody{max-height:calc(100vh - 245px)}
 .dialog.stats .stat-grid{gap:10px;margin:10px 0 4px}
 .dialog.stats .stat-grid>div{padding:8px 8px}
 .dialog.stats .stat-grid b{font-size:14.5px}
@@ -908,10 +910,10 @@ function showAnnouncement(a){
   if (!a) return;
   let html = '<div class="annbody">' + annEsc(a.body || "") + "</div>";
   (a.images || []).forEach(u => {
-    const raw = annEsc(u);
     if (!/^https:\/\//i.test(u)) return;
-    html += `<img class="annimg" src="${raw}" data-raw="${raw}" alt="公告图片"
-      onerror="if(!this.dataset.p && this.src.indexOf('gh-proxy.com')<0){this.dataset.p='1';this.src='https://gh-proxy.com/'+this.dataset.raw;}else{this.style.display='none';}">`;
+    const local = "/api/announcement/image?url=" + encodeURIComponent(u);
+    html += `<img class="annimg" src="${local}" alt="公告图片"
+      onerror="this.style.display='none'">`;
   });
   const buttons = [];
   if (a.link && /^https?:\/\//i.test(a.link)){
@@ -1611,6 +1613,7 @@ async function showStats(){
     desc: "只读设备流水与云端返回，不上传真实用量、不产生扣费",
     wide: true,
     stats: true,
+    tall: true,
     body: `
       <div class="stat-hero">
         <div class="num"><small>¥</small>${yuanTxt(r.total_saved)}</div>
