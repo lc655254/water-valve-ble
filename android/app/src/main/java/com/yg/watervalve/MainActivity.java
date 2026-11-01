@@ -218,7 +218,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.5.2");
+        appendLog("安卓版启动，版本 0.5.3");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -684,13 +684,24 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             } catch (SecurityException e) {
                 addr = "";
             }
-            tv.setText(name + "\n" + addr + "   " + item.rssi + " dBm");
+            String title;
+            String detail;
+            if (item.bound) {
+                title = "我的水表 · " + name;
+                detail = addr + "   " + item.rssi + " dBm";
+                tv.setTextColor(getColor(R.color.primary));
+                tv.setBackgroundResource(R.drawable.bg_device_item_bound);
+            } else {
+                title = item.cloudChecked ? "附近水表（未绑定）" : "附近水表";
+                detail = name + " · " + addr + "   " + item.rssi + " dBm";
+                tv.setTextColor(getColor(R.color.ink));
+                tv.setBackgroundResource(R.drawable.bg_device_item);
+            }
+            tv.setText(title + "\n" + detail);
             tv.setTextSize(13);
-            tv.setTextColor(getColor(R.color.ink));
             tv.setLineSpacing(dp(3), 1f);
             tv.setPadding(dp(14), dp(12), dp(14), dp(12));
             tv.setGravity(Gravity.START);
-            tv.setBackgroundResource(R.drawable.bg_device_item);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -698,8 +709,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             tv.setLayoutParams(lp);
             tv.setOnClickListener(v -> {
                 tap(v);
+                if (!item.bound && item.cloudChecked) {
+                    toast("这是附近未绑定水表，开阀前请确认不是别人的表");
+                }
                 manager.connect(item);
             });
+            pressScale(tv);
             tv.setAlpha(0f);
             tv.setTranslationY(dp(8));
             deviceList.addView(tv);

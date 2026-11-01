@@ -140,10 +140,19 @@ public final class Cloud {
         JSONObject d = get("/device/list/mac", p);
         if (d.optInt("errorCode", -1) != 0) return null;
         JSONArray arr = d.optJSONArray("data");
-        if (arr == null || arr.length() == 0) return null;
+        if (arr == null || arr.length() == 0) {
+            DeviceInfo empty = new DeviceInfo();
+            empty.found = false;
+            return empty;
+        }
         JSONObject o = arr.optJSONObject(0);
-        if (o == null) return null;
+        if (o == null) {
+            DeviceInfo empty = new DeviceInfo();
+            empty.found = false;
+            return empty;
+        }
         DeviceInfo di = new DeviceInfo();
+        di.found = true;
         di.deviceName = safeString(o, "deviceName");
         di.deviceId = safeString(o, "deviceId");
         di.snCode = safeString(o, "snCode");
@@ -287,6 +296,7 @@ public final class Cloud {
     }
 
     public static final class DeviceInfo {
+        public boolean found;
         public String deviceName = "";
         public String deviceId = "";
         public String snCode = "";
