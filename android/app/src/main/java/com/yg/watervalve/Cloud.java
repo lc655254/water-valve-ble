@@ -133,29 +133,36 @@ public final class Cloud {
         Map<String, String> p = new LinkedHashMap<>();
         p.put("projectId", s.projectId);
         p.put("isNew", "1");
-        p.put("macAddressList", mac.trim());
+        p.put("macAddress", mac.trim());
         p.put("loginCode", s.loginCode);
         p.put("userId", s.userId);
         p.put("accountId", s.accountId);
-        JSONObject d = get("/device/list/mac", p);
+        p.put("telephone", s.telephone);
+        JSONObject d = get("/device/info/mac", p);
         if (d.optInt("errorCode", -1) != 0) return null;
-        JSONArray arr = d.optJSONArray("data");
-        if (arr == null || arr.length() == 0) {
+        Object data = d.opt("data");
+        if (data instanceof JSONArray) {
+            JSONArray arr = (JSONArray) data;
+            data = arr.length() == 0 ? null : arr.opt(0);
+        }
+        if (!(data instanceof JSONObject)) {
             DeviceInfo empty = new DeviceInfo();
             empty.found = false;
             return empty;
         }
-        JSONObject o = arr.optJSONObject(0);
-        if (o == null) {
-            DeviceInfo empty = new DeviceInfo();
-            empty.found = false;
-            return empty;
-        }
+        JSONObject o = (JSONObject) data;
         DeviceInfo di = new DeviceInfo();
         di.found = true;
         di.deviceName = safeString(o, "deviceName");
+        if (di.deviceName.isEmpty()) di.deviceName = safeString(o, "DevName");
         di.deviceId = safeString(o, "deviceId");
         di.snCode = safeString(o, "snCode");
+        di.buildingName = safeString(o, "buildingName");
+        if (di.buildingName.isEmpty()) di.buildingName = safeString(o, "LDName");
+        di.floorName = safeString(o, "floorName");
+        if (di.floorName.isEmpty()) di.floorName = safeString(o, "LCName");
+        di.roomName = safeString(o, "roomName");
+        if (di.roomName.isEmpty()) di.roomName = safeString(o, "FJName");
         di.online = o.optBoolean("isOnline", false);
         return di;
     }
@@ -300,6 +307,9 @@ public final class Cloud {
         public String deviceName = "";
         public String deviceId = "";
         public String snCode = "";
+        public String buildingName = "";
+        public String floorName = "";
+        public String roomName = "";
         public boolean online;
     }
 

@@ -224,9 +224,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             showXiaolianDialog();
         });
         updateXiaolianButton();
-
         requestPerms();
-        appendLog("安卓版启动，版本 0.6.0");
+        appendLog("安卓版启动，版本 0.6.1");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
@@ -240,9 +239,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void updateXiaolianButton() {
         if (btnXiaolian == null) return;
-        btnXiaolian.setText(Xiaolian.hasToken(this)
-                ? "官方宿舍名已同步 · 重新登录"
-                : "同步官方宿舍名");
+        // 0.6.1 改为趣智校园 /device/info/mac，不再需要笑联登录。
+        btnXiaolian.setVisibility(View.GONE);
     }
 
     private void showXiaolianDialog() {
