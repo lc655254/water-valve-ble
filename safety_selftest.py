@@ -2,6 +2,7 @@
 """安全层自检（不碰真表、不关机）。"""
 import argparse
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -91,7 +92,9 @@ def hooks(d):
     print("hooks PASS")
 
 
-def guard():
+def guard(d):
+    gd = os.path.join(d, "guard")
+    os.makedirs(gd, exist_ok=True)
     state = {"oc": "00", "pending": {}}
     calls = []
 
@@ -112,11 +115,13 @@ def guard():
     async def settle(*a, **k):
         calls.append("settle")
         return {"ok": True, "onCharge": "00", "upload": False,
-                "clear_by": "fake", "zero_usage": True}
+                "clear_by": "fake", "zero_usage": True,
+                "flow": {"ok": True, "useCount_i": 2, "rate1_i": 25, "rate2_i": 25}}
 
     async def reclear(*a, **k):
         calls.append("reclear")
-        return {"ok": True, "onCharge": "00"}
+        return {"ok": True, "onCharge": "00",
+                "flow": {"ok": True, "useCount_i": 2, "rate1_i": 25, "rate2_i": 25}}
 
     fake = types.SimpleNamespace(
         CFG={"mac": "AA:BB:CC:DD:EE:FF", "name": "fake", "session": None},
@@ -131,16 +136,19 @@ def guard():
     vg._WV = fake
     try:
         loop = asyncio.new_event_loop()
-        assert vg._close_once(loop, {"mac": "AA:BB:CC:DD:EE:FF"}, print)
+        assert vg._close_once(loop, {"mac": "AA:BB:CC:DD:EE:FF"}, print, gd)
         assert not calls
         state["oc"] = "01"
-        assert vg._close_once(loop, {"mac": "AA:BB:CC:DD:EE:FF"}, print)
+        assert vg._close_once(loop, {"mac": "AA:BB:CC:DD:EE:FF"}, print, gd)
         assert calls and calls[-1] == "settle"
         calls.clear()
         state["oc"] = "00"
         state["pending"] = {"kind": "settle"}
-        assert vg._close_once(loop, {"mac": "AA:BB:CC:DD:EE:FF"}, print)
+        assert vg._close_once(loop, {"mac": "AA:BB:CC:DD:EE:FF"}, print, gd)
         assert calls and calls[-1] == "reclear"
+        ledger = json.load(open(os.path.join(gd, "usage_stats.json"), encoding="utf-8"))
+        assert ledger["sessions"] and ledger["sessions"][-1]["source"] == "guard"
+        print("pending + onCharge=00 -> 补清账 + 账本 OK")
         calls.clear()
         assert vg._reclear(loop, print)
         assert calls and calls[-1] == "reclear"
@@ -164,7 +172,7 @@ def main():
     if run_all or a.hooks:
         hooks(d)
     if run_all or a.guard:
-        guard()
+        guard(d)
     print("ALL PASS", d)
 
 

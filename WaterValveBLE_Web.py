@@ -278,8 +278,8 @@ STATS_FILE = os.path.join(APP_DIR, "usage_stats.json")
 _LEDGER = {"sessions": [], "loaded": False}
 
 
-def load_ledger():
-    if _LEDGER["loaded"]:
+def load_ledger(force=False):
+    if _LEDGER["loaded"] and not force:
         return _LEDGER
     try:
         with open(STATS_FILE, encoding="utf-8") as f:
@@ -334,45 +334,56 @@ def official_charge(use_l, rate_per_ton):
 COUNT_TO_LITER = 0.5
 
 
-def _record_session():
-    """关水成功后记一笔：真实用量来自设备流水，单价取同一份流水里的费率。
-
-    ⚠️ 只做本地记录与计算：不上报真实用量、不下单，不产生任何扣费。
-    """
+def _record_session(estimate=False, reason=""):
+    """关水成功后记一笔：优先设备流水；安全关阀拿不到流水时按 12 L/min 估算。"""
     try:
+        flow = (getattr(wv, "LAST_CLOSE_RESULT", {}) or {}).get("flow") or {}
         count = LAST_FLOW.get("use")
         rate = LAST_FLOW.get("rate")
-        if count is None:
+        if count is None and flow.get("ok"):
+            count = flow.get("useCount_i")
+            rate = rate or flow.get("rate2_i") or flow.get("rate1_i")
+        if count is None and not estimate:
             print("[*] 账本：本次没取到设备流水计数，这笔不记账")
             return
         if not rate:
-            rate = int(wv.CFG.get("rate") or 0) or 25      # 兜底：配置/默认 25 元每吨
-        cloud_count = LAST_ORDER.get("useCount")           # 云端下单时它自己的计数
-        if isinstance(cloud_count, int) and 0 <= cloud_count <= count:
-            units = count - cloud_count                    # 实测增量 = 本次用量（升）
+            r = float(wv.CFG.get("rate") or 0.025)
+            rate = int(round(r * 1000)) if r < 1 else int(round(r))
+        end = time.time()
+        start = WATER.get("start_ts") or end
+        cloud_count = LAST_ORDER.get("useCount")
+        if count is None:
+            use_l = round(max(0.0, (end - start) / 60.0 * 12.0), 3)
+            basis = "设备流水未取到，按 12 L/min 估算"
+        elif isinstance(cloud_count, int) and 0 <= cloud_count <= count:
+            units = count - cloud_count
             basis = "设备计数增量（设备 %d − 云端 %d）" % (count, cloud_count)
+            use_l = round(max(0.0, float(units)), 3)
         else:
             units = round(count * COUNT_TO_LITER, 3)
             basis = "按 %.1f 升/计数 折算" % COUNT_TO_LITER
-        use_l = round(max(0.0, float(units)), 3)
-        end = time.time()
-        start = WATER.get("start_ts") or end
-        by_use = official_yuan(use_l, rate)                # 按用量算出来的钱
-        charge = official_charge(use_l, rate)              # 官方实际会扣（含起步价）
+            use_l = round(max(0.0, float(units)), 3)
+        by_use = official_yuan(use_l, rate)
+        charge = official_charge(use_l, rate)
         rec = {"ts": end, "start": start, "seconds": int(max(0, end - start)),
-               "count": count,                    # 设备原始计数（实测值）
-               "cloud_use_count": cloud_count,    # 云端下单返回的计数（实测值）
-               "liters": use_l,                   # 本次用量（升）
-               "basis": basis,                    # 用量是怎么算出来的（写清楚，便于核对）
-               "rate_per_ton": int(rate),         # 官方单价（元/吨）
-               "by_use_yuan": by_use,             # 按用量计费
-               "min_charge": MIN_CHARGE_YUAN,     # 官方起步价
-               "official_yuan": charge,           # 官方实际会扣
-               "paid_yuan": 0.0,                  # 零扣费结算：实际扣费恒为 0
-               "saved_yuan": charge}
+               "count": count,
+               "cloud_use_count": cloud_count,
+               "liters": use_l,
+               "basis": basis,
+               "rate_per_ton": int(rate),
+               "by_use_yuan": by_use,
+               "min_charge": MIN_CHARGE_YUAN,
+               "official_yuan": charge,
+               "paid_yuan": 0.0,
+               "saved_yuan": charge,
+               "estimated": count is None,
+               "auto": bool(reason),
+               "reason": reason,
+               "source": "main"}
         add_session(rec)
-        report_usage(force=True)          # 每关一次水就顺手把账本报给服务器做统计
-        print(f"[*] 账本已记一笔：设备计数 {rec['count']} − 云端 {cloud_count} = "
+        report_usage(force=True)
+        print(f"[*] 账本已记一笔{'（估算）' if rec['estimated'] else ''}："
+              f"设备计数 {rec['count']} − 云端 {cloud_count} = "
               f"{rec['liters']} 升 · {rec['seconds']} 秒 · 单价 {rec['rate_per_ton']} 元/吨 · "
               f"官方会扣 ¥{rec['official_yuan']:.3f} · 实扣 ¥0.00"
               f"（省 ¥{rec['saved_yuan']:.3f}）")
@@ -382,7 +393,7 @@ def _record_session():
 
 def stats_snapshot():
     """省钱账本汇总：累计 / 本次 / 日均·周均·月均·年均（不足周期的不给数）"""
-    load_ledger()
+    load_ledger(True)
     ss = _LEDGER["sessions"]
     now = time.time()
     first_ts = ss[0]["ts"] if ss else 0
@@ -2104,16 +2115,29 @@ def safety_close_sync(reason="安全关阀", timeout=90):
             st0 = w.loop.run_until_complete(valve.query_status())
             oc0 = (st0 or {}).get("onCharge")
             if oc0 == "00":
-                if wv.pending_read():
-                    print("[安全] 设备已空闲，但有待办流水 → 补一次零用量清账")
-                    ok0 = w.loop.run_until_complete(
-                        wv.ble_reclear(valve, s, zero_usage=True))
-                    return bool(ok0)
+                was_running = bool(WATER.get("running"))
+                if wv.pending_read() or was_running:
+                    print("[安全] 设备已空闲但本次有放水/待办流水 → 补采并记账")
+                    LAST_FLOW.update(use=None, rate=None, ts=0.0)
+                    try:
+                        r0 = w.loop.run_until_complete(
+                            wv.ble_reclear(valve, s, zero_usage=True))
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[安全] 补采流水异常：{type(e).__name__}: {e}")
+                        r0 = {}
+                    if was_running:
+                        try:
+                            _record_session(estimate=True, reason=reason)
+                        except Exception:
+                            pass
+                        set_water(False, reason)
+                    return True
                 print("[安全] 设备已空闲（onCharge=00），无需关阀")
                 return True
         except Exception as e:  # noqa: BLE001
             print(f"[安全] 关阀前查询失败（继续按关阀处理）：{type(e).__name__}")
         offline = (not s) or (wv.CFG.get("last_open_mode") == "offline")
+        was_running = bool(WATER.get("running"))
         LAST_FLOW.update(use=None, rate=None, ts=0.0)
         try:
             ok = w.loop.run_until_complete(
@@ -2125,7 +2149,7 @@ def safety_close_sync(reason="安全关阀", timeout=90):
             wv.CFG["last_open_mode"] = ""
             wv.save_config()
             try:
-                _record_session()
+                _record_session(estimate=was_running, reason=reason)
             except Exception:
                 pass
             set_water(False, reason)
