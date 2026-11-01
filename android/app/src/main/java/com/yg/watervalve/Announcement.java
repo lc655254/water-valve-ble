@@ -122,10 +122,12 @@ public final class Announcement {
     }
 
     private static String fetch(String url) {
+        // 带时间戳绕过 GitHub raw / gh-proxy 的 CDN 缓存
+        String fresh = url + (url.contains("?") ? "&" : "?") + "t=" + System.currentTimeMillis();
         String[] prefixes = {"", "https://gh-proxy.com/", "https://ghproxy.net/"};
         for (String p : prefixes) {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(p + url).openConnection();
+                HttpURLConnection c = (HttpURLConnection) new URL(p + fresh).openConnection();
                 c.setConnectTimeout(7000);
                 c.setReadTimeout(7000);
                 c.setRequestProperty("User-Agent", "WaterValve-Android");
@@ -164,8 +166,7 @@ public final class Announcement {
         String[] prefixes = {"", "https://gh-proxy.com/", "https://ghproxy.net/"};
         for (String p : prefixes) {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(p + url).openConnection();
-                c.setConnectTimeout(8000);
+                HttpURLConnection c = (HttpURLConnection) new URL(p + url).openConnection();                c.setConnectTimeout(8000);
                 c.setReadTimeout(10000);
                 c.setRequestProperty("User-Agent", "WaterValve-Android");
                 c.setRequestProperty("Accept", "image/*");
