@@ -1,0 +1,13 @@
+{
+  "id": "2026-11-01-01",
+  "enabled": false,
+  "title": "公告标题",
+  "body": "这里写公告正文，支持换行。\n\n第二段内容。",
+  "images": [],
+  "link": "",
+  "linkText": "查看详情",
+  "button": "我知道了",
+  "once": true,
+  "minVersionCode": 0,
+  "maxVersionCode": 999999
+}
