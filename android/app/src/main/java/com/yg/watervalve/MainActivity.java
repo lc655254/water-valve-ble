@@ -32,6 +32,7 @@ import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -56,6 +57,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private TextView btnCopyLog;
     private TextView btnCheckUpdate;
     private TextView btnXiaolian;
+    private TextView btnNotice;
+    private Announcement.Info currentNotice;
     private LinearLayout deviceList, header, bottomBar, loginFields, logBody;
     private ScrollView logScroll;
     private View statusBarScrim, root;
@@ -103,6 +106,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnCopyLog = findViewById(R.id.btnCopyLog);
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate);
         btnXiaolian = findViewById(R.id.btnXiaolian);
+        btnNotice = findViewById(R.id.btnNotice);
         deviceList = findViewById(R.id.deviceList);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
@@ -223,15 +227,20 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             tap(v);
             showXiaolianDialog();
         });
+        btnNotice.setOnClickListener(v -> {
+            tap(v);
+            if (currentNotice != null) showAnnouncementDialog(currentNotice);
+        });
         updateXiaolianButton();
         requestPerms();
-        appendLog("安卓版启动，版本 0.6.3");
+        appendLog("安卓版启动，版本 0.7.0");
         String crash = CrashLog.last(this);
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
             CrashLog.clear(this);
         }
         setupInteractions();
+        new Handler(Looper.getMainLooper()).postDelayed(this::checkAnnouncement, 2500);
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
@@ -388,6 +397,136 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
             dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
         }
+        box.setAlpha(0f);
+        box.setScaleX(0.96f);
+        box.setScaleY(0.96f);
+        box.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(180).setInterpolator(new DecelerateInterpolator()).start();
+    }
+
+    private void checkAnnouncement() {
+        if (isFinishing() || isDestroyed()) return;
+        Announcement.check(this, (info, error) -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (info == null) {
+                currentNotice = null;
+                btnNotice.setVisibility(View.GONE);
+                return;
+            }
+            currentNotice = info;
+            btnNotice.setVisibility(View.VISIBLE);
+            if (info.once && Announcement.seen(this, info.id)) return;
+            showAnnouncementDialog(info);
+        });
+    }
+
+    private void showAnnouncementDialog(Announcement.Info info) {
+        if (info == null || isFinishing() || isDestroyed()) return;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(14));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+
+        TextView label = new TextView(this);
+        label.setText("NOTICE");
+        label.setTextSize(10);
+        label.setLetterSpacing(0.18f);
+        label.setTextColor(getColor(R.color.primary));
+        box.addView(label);
+
+        TextView title = new TextView(this);
+        title.setText(info.title);
+        title.setTextSize(22);
+        title.setTextColor(getColor(R.color.ink));
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setPadding(0, dp(4), 0, dp(8));
+        box.addView(title);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(content);
+
+        TextView body = new TextView(this);
+        body.setText(info.body);
+        body.setTextSize(13);
+        body.setTextColor(getColor(R.color.ink));
+        body.setLineSpacing(dp(4), 1f);
+        body.setTextIsSelectable(true);
+        content.addView(body);
+
+        if (info.link != null && !info.link.isEmpty()) {
+            TextView link = new TextView(this);
+            link.setText(info.linkText);
+            link.setTextSize(12);
+            link.setTextColor(getColor(R.color.primary));
+            link.setPadding(0, dp(10), 0, dp(2));
+            link.setOnClickListener(v -> {
+                try {
+                    String url = info.link.startsWith("http") ? info.link : "https://" + info.link;
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                } catch (Exception e) {
+                    toast("没有可用浏览器");
+                }
+            });
+            content.addView(link);
+        }
+
+        for (String url : info.images) {
+            ImageView image = new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setBackgroundResource(R.drawable.bg_dialog_notes);
+            image.setVisibility(View.GONE);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(180));
+            lp.topMargin = dp(10);
+            content.addView(image, lp);
+            Announcement.loadImage(this, url, image);
+        }
+
+        box.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button close = new Button(this);
+        close.setText(info.button);
+        close.setAllCaps(false);
+        close.setTextSize(14);
+        close.setTextColor(Color.WHITE);
+        close.setBackgroundResource(R.drawable.bg_button_primary);
+        close.setStateListAnimator(null);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50));
+        blp.topMargin = dp(12);
+        box.addView(close, blp);
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(box);
+        dialog.setCanceledOnTouchOutside(true);
+        close.setOnClickListener(v -> dialog.dismiss());
+        dialog.setOnDismissListener(d -> {
+            if (info.once) Announcement.markSeen(this, info.id);
+        });
+        dialog.show();
+        Window dw = dialog.getWindow();
+        if (dw != null) {
+            dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dw.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dw.setDimAmount(0.35f);
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
+            dw.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        box.post(() -> {
+            int max = (int) (getResources().getDisplayMetrics().heightPixels * 0.60f);
+            if (scroll.getHeight() > max) {
+                ViewGroup.LayoutParams lp = scroll.getLayoutParams();
+                lp.height = max;
+                scroll.setLayoutParams(lp);
+            }
+        });
         box.setAlpha(0f);
         box.setScaleX(0.96f);
         box.setScaleY(0.96f);

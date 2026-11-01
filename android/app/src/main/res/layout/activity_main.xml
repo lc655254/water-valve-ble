@@ -185,6 +185,17 @@
                     android:textColor="@color/primary"
                     android:textSize="11sp" />
 
+                <TextView
+                    android:id="@+id/btnNotice"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginTop="2dp"
+                    android:gravity="center"
+                    android:text="查看公告"
+                    android:textColor="@color/primary"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+
                 <LinearLayout
                     android:id="@+id/loginFields"
                     android:layout_width="match_parent"
