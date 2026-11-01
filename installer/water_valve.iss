@@ -1,5 +1,5 @@
 ﻿#define MyAppName "蓝牙水库"
-#define MyAppVersion "1.0.7"
+#define MyAppVersion "1.0.8"
 #define MyAppPublisher "lc655254"
 #define MyAppURL "https://github.com/lc655254/water-valve-ble"
 #define MyAppExeName "蓝牙水库安全版.exe"
@@ -32,7 +32,7 @@ LicenseFile=LICENSE.txt
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.0.7.0
+VersionInfoVersion=1.0.8.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoCompany={#MyAppPublisher}
@@ -158,5 +158,6 @@ begin
     end;
   end;
 end;
+
 
 
