@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 蓝牙水库 · 水控 Web 版  WaterValveBLE_Web.py
 =================================================
@@ -1919,7 +1919,7 @@ def api_hunt():
             if best:
                 out = [best] + [x for x in out if x["mac"] != best["mac"]]
             # 搜寻路径也要补档案名，否则列表里只显示广播名 KLCXKJ-Water
-            _attach_cloud_names(out, limit=3)
+            _attach_cloud_names(out, limit=8)
             SCAN.update(state="done", devices=out, ts=time.time())
             if not best:
                 print("[!] 搜寻结束：始终没听到水表（信号太弱 / 被占用 / 蓝牙干扰）")
