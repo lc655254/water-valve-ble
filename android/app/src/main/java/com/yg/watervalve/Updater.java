@@ -247,7 +247,7 @@ public final class Updater {
                     .setAction(InstallReceiver.ACTION_STATUS);
             int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 31) {
-                piFlags |= PendingIntent.FLAG_MUTABLE;
+                piFlags |= 0x02000000; // FLAG_MUTABLE
             }
             PendingIntent pending = PendingIntent.getBroadcast(c, 100, intent, piFlags);
             s.commit(pending.getIntentSender());

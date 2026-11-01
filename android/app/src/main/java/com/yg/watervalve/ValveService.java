@@ -36,11 +36,14 @@ public final class ValveService extends Service {
     }
 
     private static void startAction(Context context, String action) {
-        Intent i = new Intent(context, ValveService.class).setAction(action);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(i);
-        } else {
-            context.startService(i);
+        try {
+            Intent i = new Intent(context, ValveService.class).setAction(action);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(i);
+            } else {
+                context.startService(i);
+            }
+        } catch (Exception ignored) {
         }
     }
 
@@ -56,13 +59,7 @@ public final class ValveService extends Service {
         if (at < now + 5000) at = now + 5000;
         PendingIntent pi = alarmPi(context);
         try {
-            if (Build.VERSION.SDK_INT >= 31 && am.canScheduleExactAlarms()) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
-            } else if (Build.VERSION.SDK_INT >= 23) {
-                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
-            } else {
-                am.set(AlarmManager.RTC_WAKEUP, at, pi);
-            }
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
         } catch (Exception e) {
             try {
                 am.set(AlarmManager.RTC_WAKEUP, at, pi);
@@ -109,7 +106,10 @@ public final class ValveService extends Service {
         }
 
         if (ACTION_RECOVER.equals(action)) {
-            startForeground(1, buildNotification("正在恢复未关水…"));
+            if (!foreground("正在恢复未关水…")) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             if (m.hasOpenSession()) {
                 m.recoverIfOpen(true);
                 scheduleTimeout(m);
@@ -122,7 +122,10 @@ public final class ValveService extends Service {
 
         if (intent == null) {
             if (m.hasOpenSession()) {
-                startForeground(1, buildNotification("服务重启，正在恢复关水…"));
+                if (!foreground("服务重启，正在恢复关水…")) {
+                    stopSelf();
+                    return START_NOT_STICKY;
+                }
                 m.recoverIfOpen(true);
                 scheduleTimeout(m);
                 scheduleAlarm(this, m.getOpenTs());
@@ -132,7 +135,10 @@ public final class ValveService extends Service {
             return START_NOT_STICKY;
         }
 
-        startForeground(1, buildNotification("正在放水；30 分钟未关会自动关水"));
+        if (!foreground("正在放水；30 分钟未关会自动关水")) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (m.hasOpenSession()) {
             scheduleTimeout(m);
             scheduleAlarm(this, m.getOpenTs());
@@ -140,6 +146,15 @@ public final class ValveService extends Service {
         }
         stopSelf();
         return START_NOT_STICKY;
+    }
+
+    private boolean foreground(String text) {
+        try {
+            startForeground(1, buildNotification(text));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void scheduleTimeout(ValveManager m) {
