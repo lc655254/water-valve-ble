@@ -2,11 +2,19 @@ package com.yg.watervalve;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -20,17 +28,22 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity implements ValveManager.Listener {
     private ValveManager manager;
-    private TextView sessionStatus, balance, deviceStatus, waterStatus, logView, stats;
+    private TextView sessionStatus, balance, deviceStatus, waterStatus, logView, headerStatus;
+    private TextView statLastMain, statLastSub, statTotalMain, statTotalSub;
     private EditText phone, code;
-    private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater;
-    private LinearLayout deviceList;
+    private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater, btnCopyLog;
+    private LinearLayout deviceList, header, bottomBar;
     private ScrollView logScroll;
+    private View statusBarScrim, root;
     private final StringBuilder logBuf = new StringBuilder();
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.CHINA);
     private boolean running;
+    private boolean connected;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,7 +55,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         balance = findViewById(R.id.balance);
         deviceStatus = findViewById(R.id.deviceStatus);
         waterStatus = findViewById(R.id.waterStatus);
-        stats = findViewById(R.id.stats);
+        headerStatus = findViewById(R.id.headerStatus);
+        statLastMain = findViewById(R.id.statLastMain);
+        statLastSub = findViewById(R.id.statLastSub);
+        statTotalMain = findViewById(R.id.statTotalMain);
+        statTotalSub = findViewById(R.id.statTotalSub);
         logView = findViewById(R.id.log);
         logScroll = findViewById(R.id.logScroll);
         phone = findViewById(R.id.phone);
@@ -52,16 +69,27 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnScan = findViewById(R.id.btnScan);
         btnQuery = findViewById(R.id.btnQuery);
         btnWater = findViewById(R.id.btnWater);
+        btnCopyLog = findViewById(R.id.btnCopyLog);
         deviceList = findViewById(R.id.deviceList);
+        header = findViewById(R.id.header);
+        bottomBar = findViewById(R.id.bottomBar);
+        statusBarScrim = findViewById(R.id.statusBarScrim);
+        root = findViewById(R.id.root);
+
+        setupWindow();
         manager.setListener(this);
 
         phone.setText(manager.getPhone());
         running = manager.isRunning();
+        connected = manager.isConnected();
         renderSession(manager.getSession());
         renderDevice();
-        stats.setText(manager.getStatsText());
+        renderStats(manager.getStatsText());
         btnWater.setText(running ? "关水" : "开水");
-        waterStatus.setText(running ? "正在放水" : "状态未知");
+        btnWater.setBackgroundResource(running
+                ? R.drawable.bg_button_danger : R.drawable.bg_button_primary);
+        waterStatus.setText(running ? "正在放水" : (connected ? "水表已连接" : "状态未知"));
+        updateHeader();
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
@@ -91,9 +119,56 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             if (manager.isRunning()) manager.close("用户关水");
             else manager.open();
         });
+        btnCopyLog.setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("water-valve-log",
+                        logView.getText().toString()));
+                toast("日志已复制");
+            }
+        });
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.1.2");
+        appendLog("安卓版启动，版本 0.2.0");
+    }
+
+    private void setupWindow() {
+        Window w = getWindow();
+        w.setStatusBarColor(Color.TRANSPARENT);
+        w.setNavigationBarColor(getColor(R.color.bg));
+        if (Build.VERSION.SDK_INT >= 30) {
+            Api30.setup(w);
+        } else {
+            w.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
+
+        final int headerTop = header.getPaddingTop();
+        final int bottomPad = bottomBar.getPaddingBottom();
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= 30) {
+                top = Api30.top(insets);
+                bottom = Api30.bottom(insets);
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            ViewGroup.LayoutParams lp = statusBarScrim.getLayoutParams();
+            if (lp.height != top) {
+                lp.height = top;
+                statusBarScrim.setLayoutParams(lp);
+            }
+            header.setPadding(header.getPaddingLeft(), headerTop + top,
+                    header.getPaddingRight(), header.getPaddingBottom());
+            bottomBar.setPadding(bottomBar.getPaddingLeft(), bottomBar.getPaddingTop(),
+                    bottomBar.getPaddingRight(), bottomPad + bottom);
+            return insets;
+        });
+        root.requestApplyInsets();
     }
 
     private void requestPerms() {
@@ -107,9 +182,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         if (Build.VERSION.SDK_INT >= 33) {
             addIfMissing(ps, Manifest.permission.POST_NOTIFICATIONS);
         }
-        if (!ps.isEmpty()) {
-            requestPermissions(ps.toArray(new String[0]), 1);
-        }
+        if (!ps.isEmpty()) requestPermissions(ps.toArray(new String[0]), 1);
     }
 
     private void addIfMissing(List<String> ps, String p) {
@@ -131,25 +204,57 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void renderSession(Cloud.Session s) {
         if (s == null) {
-            sessionStatus.setText("未登录（手机号 + 短信验证码登录）");
+            sessionStatus.setText("未登录（手机号 + 短信验证码）");
             balance.setText("");
             return;
         }
-        String who = s.userName == null || s.userName.isEmpty() ? s.telephone : s.userName;
+        String who = s.userName == null || s.userName.isEmpty()
+                || "null".equalsIgnoreCase(s.userName) ? s.telephone : s.userName;
         sessionStatus.setText("已登录：" + who + " · 项目 " + s.projectId);
         String bal = Cloud.fmtMoney(s.balance);
-        balance.setText(bal.isEmpty() ? "" : "余额：" + bal + " 元");
+        balance.setText(bal.isEmpty() ? "" : "¥" + bal);
     }
 
     private void renderDevice() {
         String name = manager.getDeviceName();
-        String mac = manager.getMac();
-        if ((name == null || name.isEmpty()) && (mac == null || mac.isEmpty())) {
+        String m = manager.getMac();
+        if ((name == null || name.isEmpty()) && (m == null || m.isEmpty())) {
             deviceStatus.setText("未连接设备");
         } else {
             deviceStatus.setText((name == null || name.isEmpty() ? "水表" : name)
-                    + " · " + (mac == null ? "" : mac));
+                    + " · " + (m == null ? "" : m));
         }
+    }
+
+    private void renderStats(String text) {
+        statLastMain.setText("—");
+        statLastSub.setText("还没有记录");
+        statTotalMain.setText("—");
+        statTotalSub.setText("还没有记录");
+        if (text == null || text.startsWith("账本：还没有")) return;
+        Matcher m = Pattern.compile("本次：(\\d+) 秒 · ([\\d.]+) L · 省 ¥([\\d.]+)")
+                .matcher(text);
+        if (m.find()) {
+            statLastMain.setText(m.group(2) + " L");
+            statLastSub.setText(m.group(1) + " 秒 · 省 ¥" + m.group(3));
+        }
+        Matcher t = Pattern.compile("累计：(\\d+) 次 · ([\\d.]+) L · 省 ¥([\\d.]+)")
+                .matcher(text);
+        if (t.find()) {
+            statTotalMain.setText(t.group(2) + " L");
+            statTotalSub.setText(t.group(1) + " 次 · 省 ¥" + t.group(3));
+        }
+    }
+
+    private void updateHeader() {
+        if (running) setHeader("● 放水中", getColor(R.color.amber));
+        else if (connected) setHeader("● 已连接", getColor(R.color.green_light));
+        else setHeader("● 未连接", getColor(R.color.white_70));
+    }
+
+    private void setHeader(String text, int color) {
+        headerStatus.setText(text);
+        headerStatus.setTextColor(color);
     }
 
     @Override
@@ -176,8 +281,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnWater.setEnabled(!busy);
         if (busy) {
             btnWater.setText(label == null || label.isEmpty() ? "处理中…" : label + "…");
+            btnWater.setBackgroundResource(R.drawable.bg_button_primary);
         } else {
             btnWater.setText(running ? "关水" : "开水");
+            btnWater.setBackgroundResource(running
+                    ? R.drawable.bg_button_danger : R.drawable.bg_button_primary);
         }
     }
 
@@ -185,7 +293,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     public void onWater(boolean running) {
         this.running = running;
         btnWater.setText(running ? "关水" : "开水");
-        waterStatus.setText(running ? "正在放水" : "空闲");
+        btnWater.setBackgroundResource(running
+                ? R.drawable.bg_button_danger : R.drawable.bg_button_primary);
+        waterStatus.setText(running ? "正在放水 · 通知栏可关水" : (connected ? "水表已连接" : "空闲"));
+        updateHeader();
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         } else {
@@ -210,14 +321,17 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             } catch (SecurityException e) {
                 addr = "";
             }
-            tv.setText(name + "\n" + addr + "  " + item.rssi + " dBm");
+            tv.setText(name + "\n" + addr + "  " + item.rssi + " dBm  ·  点此连接");
             tv.setTextSize(13);
-            tv.setPadding(16, 12, 16, 12);
+            tv.setTextColor(getColor(R.color.ink));
+            tv.setLineSpacing(dp(3), 1f);
+            tv.setPadding(dp(14), dp(12), dp(14), dp(12));
             tv.setGravity(Gravity.START);
-            tv.setBackgroundColor(0x11000000);
+            tv.setBackgroundResource(R.drawable.bg_device_item);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = 6;
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(8);
             tv.setLayoutParams(lp);
             tv.setOnClickListener(v -> manager.connect(item));
             deviceList.addView(tv);
@@ -226,20 +340,30 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             TextView tv = new TextView(this);
             tv.setText("没有扫描到水表，靠近水表再试");
             tv.setTextSize(12);
-            tv.setPadding(8, 8, 8, 8);
+            tv.setTextColor(getColor(R.color.muted));
+            tv.setPadding(dp(8), dp(10), dp(8), dp(6));
             deviceList.addView(tv);
         }
     }
 
     @Override
     public void onQuery(Protocol.Query q) {
+        connected = true;
         waterStatus.setText("设备：" + q.statusText() + " · onCharge=" + q.onCharge);
+        updateHeader();
         renderDevice();
     }
 
     @Override
     public void onStats(String text) {
-        stats.setText(text);
+        renderStats(text);
+    }
+
+    @Override
+    public void onConnection(boolean connected) {
+        this.connected = connected;
+        if (!connected && !running) waterStatus.setText("未连接水表");
+        updateHeader();
     }
 
     @Override
@@ -259,7 +383,34 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         super.onDestroy();
     }
 
+    private int dp(int v) {
+        return Math.round(getResources().getDisplayMetrics().density * v);
+    }
+
     private void toast(String msg) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    /** API 30+ 才加载，避免旧系统解析新类。 */
+    private static final class Api30 {
+        static void setup(Window w) {
+            w.setDecorFitsSystemWindows(false);
+            WindowInsetsController c = w.getInsetsController();
+            if (c != null) {
+                c.setSystemBarsAppearance(
+                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                c.setSystemBarsAppearance(0,
+                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+            }
+        }
+
+        static int top(WindowInsets i) {
+            return i.getInsets(WindowInsets.Type.systemBars()).top;
+        }
+
+        static int bottom(WindowInsets i) {
+            return i.getInsets(WindowInsets.Type.systemBars()).bottom;
+        }
     }
 }
