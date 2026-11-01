@@ -3078,6 +3078,53 @@ async def toggle_mode(valve):
     print(f"  {C.ok('[OK]')} 已切换（已保存，下次启动沿用）")
 
 
+_DEV_INFO_CACHE = {}
+
+
+def _mac_candidates(mac):
+    out = []
+    m = (mac or "").upper().replace("-", ":").strip()
+    if not m:
+        return out
+    frame = (CFG.get("frame_mac") or "").upper()
+    if frame and frame != m:
+        out.append(frame)
+    out.append(m)
+    parts = m.split(":")
+    if len(parts) == 6:
+        try:
+            b0 = int(parts[0], 16)
+            for c in ("%02X" % (b0 & 0x3F), "00", "C0", "02"):
+                cand = ":".join([c] + parts[1:])
+                if cand not in out:
+                    out.append(cand)
+        except ValueError:
+            pass
+    return out
+
+
+def cloud_device_info(s, mac, force=False):
+    """按 MAC 查趣智校园设备档案（官方 /device/info/mac，含房间名）。"""
+    if not s or not mac:
+        return None
+    key = (mac or "").upper()
+    if not force and key in _DEV_INFO_CACHE:
+        return _DEV_INFO_CACHE[key]
+    for cand in _mac_candidates(mac):
+        d = api("GET", "/device/info/mac", {
+            "projectId": s.get("projectId"), "loginCode": s.get("loginCode"),
+            "userId": s.get("userId"), "accountId": s.get("accountId"),
+            "telephone": s.get("telephone"), "macAddress": cand, "isNew": "1"})
+        data = (d or {}).get("data")
+        if isinstance(data, list) and data:
+            data = data[0]
+        if isinstance(data, dict) and data:
+            _DEV_INFO_CACHE[key] = data
+            return data
+    _DEV_INFO_CACHE[key] = None
+    return None
+
+
 async def choose_device(valve, s):
     """搜索蓝牙设备并选择目标"""
     print("  " + "-" * 56)
@@ -3097,12 +3144,23 @@ async def choose_device(valve, s):
                 or any(addr.startswith(p) for p in _oui_prefixes()))
 
     devs.sort(key=lambda x: (0 if is_meter(x) else 1, -(x[2] or -999)))
+    info_map = {}
+    if s:
+        n = 0
+        for nm, addr, rssi in devs:
+            if n >= 8:
+                break
+            if is_meter((nm, addr, rssi)):
+                info_map[(addr or "").upper()] = cloud_device_info(s, addr)
+                n += 1
     print()
     print(f"  {'序号':<4} {'设备名':<24} {'MAC 地址':<22} {'信号':>6}")
     print("  " + "-" * 58)
     for i, (nm, addr, rssi) in enumerate(devs, 1):
         mark = " *" if is_meter((nm, addr, rssi)) else ""
-        print(f"  {i:<4} {nm[:22]:<24} {addr:<22} {rssi:>4}{mark}")
+        info = info_map.get((addr or "").upper()) or {}
+        disp = info.get("deviceName") or info.get("DevName") or nm
+        print(f"  {i:<4} {disp[:22]:<24} {addr:<22} {rssi:>4}{mark}")
     print("  " + "-" * 58)
     print(f"  * = 疑似水控设备（名称关键字 / 厂商前缀 {_oui_text()} 任一命中）")
     r = input("  输入序号选择设备（回车取消）：").strip()
