@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 蓝牙水库 · 水控 Web 版  WaterValveBLE_Web.py
 =================================================
@@ -45,7 +45,7 @@ import WaterValveBLE_v4 as wv          # 复用 v4.6 业务逻辑（不启动它
 import valve_safety as vsafety          # 防呆安全层：会话落盘 / 看门狗 / 关机拦截
 import valve_updater as updater          # GitHub Release 自动更新
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 
 def _res_dir():
     """页面资源目录：
@@ -71,7 +71,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.10"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -1181,6 +1181,44 @@ def api_announcement():
         return jsonify({"ok": True, "data": _fetch_announcement()})
     except Exception as e:
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
+
+ANN_IMG_CACHE = {}
+
+
+def _ann_allowed_image(url):
+    return (isinstance(url, str) and url.startswith("https://")
+            and "raw.githubusercontent.com/lc655254/water-valve-ble/" in url)
+
+
+@app.route("/api/announcement/image")
+def api_announcement_image():
+    """公告图片走本地代理：WebView 不直连 GitHub，避免图片偶发加载失败。"""
+    url = request.args.get("url", "")
+    if not _ann_allowed_image(url):
+        return Response(status=400)
+    cached = ANN_IMG_CACHE.get(url)
+    if cached:
+        return Response(cached[0], mimetype=cached[1],
+                        headers={"Cache-Control": "public, max-age=86400"})
+    prefixes = ("", "https://gh-proxy.com/", "https://ghproxy.net/")
+    for prefix in prefixes:
+        try:
+            r = requests.get(prefix + url, timeout=10, headers={
+                "User-Agent": "WaterValve-PC", "Accept": "image/*"})
+            if r.status_code != 200 or not r.content:
+                continue
+            ct = (r.headers.get("Content-Type") or "image/png").split(";")[0]
+            if not ct.startswith("image/"):
+                ct = "image/png"
+            ANN_IMG_CACHE[url] = (r.content, ct)
+            if len(ANN_IMG_CACHE) > 20:
+                ANN_IMG_CACHE.pop(next(iter(ANN_IMG_CACHE)))
+            return Response(r.content, mimetype=ct,
+                            headers={"Cache-Control": "public, max-age=86400"})
+        except Exception:
+            continue
+    return Response(status=404)
 
 
 @app.route("/api/copy", methods=["POST"])
@@ -2731,5 +2769,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
