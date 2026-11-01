@@ -14,6 +14,7 @@ import android.provider.Settings;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -292,15 +293,16 @@ public final class Updater {
         c.setRequestProperty("Accept", "application/vnd.github+json");
         int code = c.getResponseCode();
         if (code >= 400) throw new IOException("GitHub HTTP " + code);
-        StringBuilder sb = new StringBuilder();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (InputStream in = c.getInputStream()) {
             byte[] buf = new byte[8192];
             int n;
-            while ((n = in.read(buf)) > 0) sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
         } finally {
             c.disconnect();
         }
-        return new JSONObject(sb.toString());
+        // 必须整段解码；逐块 new String 会把跨 8192 边界的 UTF-8 汉字拆成两个 �
+        return new JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
     }
 
     private static String sha256(File f) throws Exception {
