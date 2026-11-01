@@ -57,8 +57,17 @@ def _api_json():
         if os.name == "nt":
             cmd.insert(3, "--ssl-no-revoke")
         cmd.append(API)
+        # GUI 程序里跑 curl 必须隐藏控制台，否则会闪一下小黑框
+        kwargs = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= 0x00000001             # STARTF_USESHOWWINDOW
+            si.wShowWindow = 0                   # SW_HIDE
+            kwargs["startupinfo"] = si
         p = subprocess.run(cmd, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=15)
+                           encoding="utf-8", errors="replace", timeout=15,
+                           **kwargs)
         if p.returncode == 0 and p.stdout.strip():
             return json.loads(p.stdout)
     r = requests.get(API, headers={"User-Agent": UA,
