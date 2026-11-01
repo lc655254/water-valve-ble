@@ -6,7 +6,7 @@ KLCXKJ-Water（base42）蓝牙水表的本地控制客户端：Flask + pywebview
 
 > Windows 安装包：[Releases](https://github.com/lc655254/water-valve-ble/releases/latest)（per-user，无需管理员，onedir 负载）
 >
-> Android APK：[Releases](https://github.com/lc655254/water-valve-ble/releases/tag/v1.0.5)（手机 BLE 直连，`minSdk 26`）
+> Android APK：[Releases](https://github.com/lc655254/water-valve-ble/releases/tag/v1.0.5)（Material 3 UI · 手机 BLE 直连 · `minSdk 26`）
 
 > 仅用于自己有权控制的设备与本地学习/互操作研究。协议为逆向所得，与设备厂商无关联；计费与账号规则以厂商为准，使用风险自负。
 
@@ -20,7 +20,7 @@ KLCXKJ-Water（base42）蓝牙水表的本地控制客户端：Flask + pywebview
 - Windows 关机 / 注销 / 重启 / 休眠 / Alt+F4 前先零用量关阀
 - 独立看门狗：主程序被杀、崩溃、断电重启后自动收尾
 - GitHub Release 自动更新：镜像测速、SHA256 校验、静默安装并重启
-- Android 端（`android/`）：手机 BLE 直连、短信登录、开关水、零用量结算、放水前台服务
+- Android 端（`android/`）：Material 3 界面、手机 BLE 直连、短信登录、开关水、零用量结算、放水前台服务
 
 ## 安全设计（摘要）
 
