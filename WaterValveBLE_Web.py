@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 蓝牙水库 · 水控 Web 版  WaterValveBLE_Web.py
 =================================================
@@ -69,7 +69,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -1647,8 +1647,13 @@ def _attach_cloud_names(devices, limit=8):
                                          info.get("floorName") or info.get("LCName") or "",
                                          info.get("roomName") or info.get("FJName") or "") if x)
         kind = info.get("smallTypeName") or info.get("bigTypeName") or ""
-        d["cloud_name"] = " · ".join(x for x in (kind, place) if x)
+        full = info.get("deviceName") or info.get("DevName") or ""
+        d["cloud_full"] = full
+        d["cloud_name"] = full or " · ".join(x for x in (kind, place) if x)
         d["room"] = info.get("roomName") or ""
+        d["place"] = place
+        if d.get("cloud_name"):
+            print(f"[*] 云端名称：{d['mac']} → {d['cloud_name']}")
         sn = (info.get("snCode") or "").replace(":", "").upper()
         if sn and sn == (d.get("mac") or "").replace(":", "").upper():
             d["is_saved"] = True
@@ -2672,3 +2677,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
