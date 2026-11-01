@@ -118,12 +118,13 @@ public final class Updater {
                 return;
             }
             String[] mirrors = {
-                    info.url,
                     "https://gh-proxy.com/" + info.url,
                     "https://ghproxy.net/" + info.url,
-                    "https://ghfast.top/" + info.url
+                    "https://ghfast.top/" + info.url,
+                    info.url
             };
             String last = "下载失败";
+            if (progress != null) MAIN.post(() -> progress.progress(-1, 0, info.size));
             for (String url : mirrors) {
                 if (url == null || url.isEmpty()) continue;
                 try {
@@ -136,7 +137,9 @@ public final class Updater {
                     last = e.getClass().getSimpleName()
                             + (e.getMessage() == null ? "" : " " + e.getMessage());
                     out.delete();
-                    MAIN.post(() -> progress.progress(0, 0, info.size));
+                    if (progress != null) {
+                        MAIN.post(() -> progress.progress(-1, 0, info.size));
+                    }
                 }
             }
             final String fe = last;
@@ -146,15 +149,32 @@ public final class Updater {
 
     private static void downloadOne(String url, File out, Info info,
                                     ProgressCallback progress) throws Exception {
-        HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(20000);
-        c.setReadTimeout(60000);
-        c.setInstanceFollowRedirects(true);
-        c.setRequestProperty("User-Agent", "WaterValve-Android");
-        int code = c.getResponseCode();
-        if (code >= 400) throw new IOException("HTTP " + code);
+        HttpURLConnection c = null;
+        String current = url;
+        for (int hop = 0; ; hop++) {
+            if (hop > 6) throw new IOException("重定向次数过多");
+            c = (HttpURLConnection) new URL(current).openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(30000);
+            c.setInstanceFollowRedirects(false);
+            c.setRequestProperty("User-Agent", "WaterValve-Android");
+            c.setRequestProperty("Accept", "application/octet-stream");
+            c.setRequestProperty("Accept-Encoding", "identity");
+            int code = c.getResponseCode();
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                String loc = c.getHeaderField("Location");
+                c.disconnect();
+                if (loc == null || loc.isEmpty()) throw new IOException("重定向缺少 Location");
+                current = new URL(new URL(current), loc).toString();
+                continue;
+            }
+            if (code >= 400) throw new IOException("HTTP " + code);
+            break;
+        }
         long total = c.getContentLengthLong();
         if (total <= 0) total = info.size;
+        final long ft = total;
+        if (progress != null) MAIN.post(() -> progress.progress(-1, 0, ft));
         try (InputStream in = c.getInputStream();
              OutputStream os = new FileOutputStream(out)) {
             byte[] buf = new byte[16384];
@@ -169,7 +189,7 @@ public final class Updater {
                     if (pct != lastPct) {
                         lastPct = pct;
                         final int fp = pct;
-                        final long fr = read, ft = total;
+                        final long fr = read;
                         if (progress != null) MAIN.post(() -> progress.progress(fp, fr, ft));
                     }
                 }
@@ -225,8 +245,11 @@ public final class Updater {
             }
             Intent intent = new Intent(c, InstallReceiver.class)
                     .setAction(InstallReceiver.ACTION_STATUS);
-            PendingIntent pending = PendingIntent.getBroadcast(c, 100, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 31) {
+                piFlags |= PendingIntent.FLAG_MUTABLE;
+            }
+            PendingIntent pending = PendingIntent.getBroadcast(c, 100, intent, piFlags);
             s.commit(pending.getIntentSender());
         }
     }

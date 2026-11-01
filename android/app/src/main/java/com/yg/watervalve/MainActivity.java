@@ -8,9 +8,11 @@ import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -167,7 +169,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnCheckUpdate.setOnClickListener(v -> checkUpdate(false));
 
         requestPerms();
-        appendLog("安卓版启动，版本 0.4.1");
+        appendLog("安卓版启动，版本 0.4.2");
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
         }, 4000);
@@ -274,14 +276,25 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         updateProgress = new ProgressDialog(this);
         updateProgress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
         updateProgress.setMax(100);
+        updateProgress.setIndeterminate(true);
         updateProgress.setCancelable(false);
-        updateProgress.setMessage("下载中…");
+        updateProgress.setMessage("正在连接下载源…");
         updateProgress.show();
         Updater.download(this, info,
                 (pct, bytes, total) -> runOnUiThread(() -> {
                     if (updateProgress == null) return;
-                    updateProgress.setProgress(pct);
-                    updateProgress.setMessage("下载中… " + pct + "%");
+                    if (pct < 0) {
+                        if (!updateProgress.isIndeterminate()) {
+                            updateProgress.setIndeterminate(true);
+                        }
+                        updateProgress.setMessage("正在连接下载源…");
+                    } else {
+                        if (updateProgress.isIndeterminate()) {
+                            updateProgress.setIndeterminate(false);
+                        }
+                        updateProgress.setProgress(pct);
+                        updateProgress.setMessage("下载中… " + pct + "%");
+                    }
                 }),
                 (file, error) -> runOnUiThread(() -> {
                     if (updateProgress != null) {
@@ -291,13 +304,24 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                     if (error != null) {
                         new AlertDialog.Builder(this)
                                 .setTitle("更新下载失败")
-                                .setMessage(error)
-                                .setPositiveButton("知道了", null)
+                                .setMessage(error + "\n\n可改用浏览器打开镜像下载。")
+                                .setPositiveButton("浏览器下载",
+                                        (d, w) -> openDownloadInBrowser(info))
+                                .setNegativeButton("知道了", null)
                                 .show();
                         return;
                     }
                     installUpdate(file);
                 }));
+    }
+
+    private void openDownloadInBrowser(Updater.Info info) {
+        try {
+            String url = "https://gh-proxy.com/" + info.url;
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception e) {
+            toast("没有可用浏览器");
+        }
     }
 
     private void installUpdate(File file) {
