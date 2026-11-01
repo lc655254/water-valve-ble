@@ -24,3 +24,9 @@ __pycache__/
 *.apk
 *.log
 installer/Output/
+android/.gradle/
+android/local.properties
+android/**/build/
+android/dist/
+android/*.jks
+android/keystore.properties
