@@ -1621,16 +1621,21 @@ class WaterValveBLE:
         raise last
 
     async def _write_frame(self, frame):
-        """分片发送整帧。
+        """整帧一次写，失败才退回分片。
 
-        帧长超过 MTU 时整帧写会被底层截断，85 采集 / 86 清账这类带负载的帧
-        尤其明显（清账负载最长 41 字节，整帧可达 60 字节）。按 WRITE_CHUNK
-        切片、片间留出间隔，让对端有时间消化。
+        官方 App（watercontrol 反编译）就是整帧一次 writeCharacteristic：
+        超过 MTU-3 时由协议栈自己走长写（Prepare/Execute），模块把整帧当作
+        一次 UART 包转给 MCU。旧实现固定 20 字节切片 + 150ms 间隔，86 清账帧
+        会被切成 20/20/20/1 四包，设备按断帧处理，一律回 0x81（数据不符）。
         """
         data = frame.encode("ascii")
-        if len(data) <= WRITE_CHUNK:
+        try:
             await self._write_chunk(data)
             return
+        except Exception as e:                      # noqa: BLE001
+            dbg(f"整帧写入失败，退回分片：{e}")
+        if len(data) <= WRITE_CHUNK:
+            raise TimeoutError("整帧写入失败")
         total = (len(data) + WRITE_CHUNK - 1) // WRITE_CHUNK
         dbg(f"分片发送 0x{frame[9:11]}：{len(data)} 字节 / {total} 片")
         for i in range(0, len(data), WRITE_CHUNK):
@@ -2227,10 +2232,19 @@ def clear_payload_candidates(collect_hex, clear_code=None, full=None, prefer=Non
             if take > 0:
                 cands.append((name, hs[:take * 2]))
 
-    # 含 status 的完整形式：新型号固件可能只认它（实测老固件两者都拒）
+    # 含 status 的完整形式：官方 App（watercontrol klSendClearOfficial）的清除负载
+    # 取的是 respData 前 22 字节，而 respData 第 1 字节就是 0x80 状态位。
+    # 旧实现只给「去 status」的采集数据，整串比设备手里的流水错开 1 字节，
+    # 设备一律回 0x81（数据不符）。所以含 status 的形态必须排在前面。
     hf = norm_hex(full) if full else ""
     if hf:
+        if len(hf) >= 44:
+            cands.append(("含status前22B(官方)", hf[:44]))
         cands.append(("含status全长", hf))
+        if len(hf) >= 46:
+            cands.append(("含status前23B", hf[:46]))
+        if len(hf) >= 82:
+            cands.append(("含status前41B", hf[:82]))
         base = min(FLOW_BASE_LEN, len(hf) // 2)
         if base > 0:
             cands.append((f"含status基础{FLOW_BASE_LEN}B", hf[:base * 2]))
@@ -2447,13 +2461,24 @@ async def ble_settle(valve, s, random_number="", comm_mode="", tag="2] 关阀",
     #   用「开阀后的新值」+ 本次流水 → 服务端接受
     #   用「开阀前的旧值」+ 本次流水 → errorCode=226 加密校验失败
     # 因此按 开阀后 → 开阀前 → 现查 的顺序依次尝试，两种固件都能覆盖。
+    # 结算前先查一次 23：设备此刻报的 tacTimes 才是这条流水绑定的随机数。
+    # 只拿开阀时存下来的值，设备只要又翻过一次号，上传就永远 226。
     if not comm_mode:
         comm_mode = CFG.get("last_cm") or ""
+    fresh_rn = fresh_cm = ""
+    try:
+        st_now = await _query_rw(valve)
+        fresh_rn = st_now["tacTimes"]
+        fresh_cm = st_now["commMode"]
+    except TimeoutError:
+        pass
     rn_cands = []
-    for cand in (CFG.get("last_rn"), CFG.get("last_rn_pre"), random_number):
+    for cand in (fresh_rn, CFG.get("last_rn"), CFG.get("last_rn_pre"), random_number):
         c = (cand or "").strip().upper()
         if c and c not in rn_cands:
             rn_cands.append(c)
+    if fresh_cm and not comm_mode:
+        comm_mode = fresh_cm
     if not rn_cands:
         for _ in range(2):
             try:
@@ -2464,7 +2489,7 @@ async def ble_settle(valve, s, random_number="", comm_mode="", tag="2] 关阀",
             except TimeoutError:
                 await asyncio.sleep(1.5)
     if rn_cands:
-        tag = "开阀后" if CFG.get("last_rn") else "现查"
+        tag = "现查" if fresh_rn else ("开阀后" if CFG.get("last_rn") else "旧值")
         print(f"  {C.info('[*]')} 上传候选 randomNumber={rn_cands}（首个为{tag}值）"
               f" commMode={comm_mode}")
     random_number = rn_cands[0] if rn_cands else ""

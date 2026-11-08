@@ -196,6 +196,16 @@ public final class Protocol {
                 + f.mac + f.ext).toUpperCase();
     }
 
+    /**
+     * 86 清账负载候选。
+     *
+     * 官方（watercontrol 反编译 MainActivity#klSendClearOfficial）取的负载是
+     * **respData 的前 22 字节**，而 respData 是「status 0x80 + 数据域」——
+     * 也就是说官方负载第 1 个字节就是 0x80。旧版这里用去掉 status 的采集数据，
+     * 整串比设备手里的流水错开 1 字节，设备一律回 0x81（数据不符）。
+     *
+     * 所以含 status 的变体必须排在前面，去 status 的旧变体留作兜底。
+     */
     public static List<Labeled> clearCandidates(String collect, String clearCode,
                                                 String full, String prefer) {
         List<Labeled> out = new ArrayList<>();
@@ -203,24 +213,35 @@ public final class Protocol {
         addCandidate(out, seen, "云端clearCode", clearCode);
 
         List<Labeled> local = new ArrayList<>();
-        String c = normHex(collect);
-        if (!c.isEmpty()) {
-            int n = c.length() / 2;
+        String hf = normHex(full);          // 含 status，等价官方 respData
+        String c = normHex(collect);        // 去 status，旧版负载
+        int nf = hf.length() / 2;
+        int nc = c.length() / 2;
+
+        // ① 官方形态：respData 前 22B / 前 23B / 全长
+        if (nf >= 22) local.add(new Labeled("含status前22B(官方)", hf.substring(0, 44)));
+        if (nf > 0) local.add(new Labeled("含status全长", hf));
+        if (nf >= 23) local.add(new Labeled("含status前23B", hf.substring(0, 46)));
+        if (nf >= 41) local.add(new Labeled("含status前41B", hf.substring(0, 82)));
+        if (nf >= FLOW_BASE_LEN) {
+            local.add(new Labeled("含status基础" + FLOW_BASE_LEN + "B",
+                    hf.substring(0, FLOW_BASE_LEN * 2)));
+        }
+
+        // ② 旧形态：去 status 的前 N 字节
+        if (nc > 0) {
             for (int size : CLEAR_SIZES) {
-                int take = size == -1 ? n : Math.min(size, n);
+                int take = size == -1 ? nc : Math.min(size, nc);
                 if (take > 0) {
                     local.add(new Labeled(size == -1 ? "采集全长" : "采集前" + size + "B",
                             c.substring(0, take * 2)));
                 }
             }
         }
-        String hf = normHex(full);
-        if (!hf.isEmpty()) {
-            local.add(new Labeled("含status全长", hf));
-            int base = Math.min(FLOW_BASE_LEN, hf.length() / 2);
-            if (base > 0) local.add(new Labeled("含status基础" + FLOW_BASE_LEN + "B",
-                    hf.substring(0, base * 2)));
-        }
+
+        // ③ 空负载：部分固件只要身份已清就接受
+        local.add(new Labeled("空负载", "00"));
+
         if (prefer != null && !prefer.isEmpty()) {
             local.sort((a, b) -> (a.name.equals(prefer) ? 0 : 1) - (b.name.equals(prefer) ? 0 : 1));
         }
