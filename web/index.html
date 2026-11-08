@@ -1921,7 +1921,7 @@ function showDevicePicker(res){
     if (d.reason) tags.push(`<span class="tag">${d.reason}</span>`);
     if (d.is_saved) tags.push(`<span class="tag ok">已保存</span>`);
     return `
-    <div class="devitem${i===0?" sel":""}${d.suspected?" suspect":""}" data-i="${i}">
+    <div class="devitem${i===0?" sel":""}${d.suspected?" suspect":""}" data-i="${i}" data-mac="${d.mac}">
       <div class="row1">
         <span class="nm">${d.suspected ? "★ " : ""}${disp}</span>
         <span class="sig${weak?" weak":""}">${bars(rssi)} ${rssi} dBm${weak?" ⚠":""}</span>
@@ -1997,6 +1997,37 @@ function showDevicePicker(res){
         };
       });
     }
+  });
+  // 批量补云端档案名（宿舍 · 楼层 · 房间）——手机上看到的就是这个
+  api("/api/device/names", {macs: devices.map(d => d.mac)}, {retry:1}).then(r => {
+    if (!r || !r.ok) return;
+    if (!r.logged_in){
+      const hint = $("mHint");
+      if (hint) hint.innerHTML =
+        '<span class="warnline">未登录 / 会话已过期：现在只能看到广播名，' +
+        '点「重登」后这里会显示宿舍 · 楼层 · 房间</span>';
+      return;
+    }
+    const names = r.names || {};
+    document.querySelectorAll(".devitem[data-mac]").forEach(el => {
+      const n = names[(el.dataset.mac || "").toUpperCase()];
+      if (!n) return;
+      const want = n.full || n.place;
+      if (!want) return;
+      const nm = el.querySelector(".nm");
+      if (!nm) return;
+      const star = nm.textContent.startsWith("★ ");
+      const cur = nm.textContent.replace(/^★ /, "");
+      if (cur === want) return;
+      nm.textContent = (star ? "★ " : "") + want;
+      const row2 = el.querySelector(".row2");
+      if (row2 && cur && cur !== "(未命名)" && !row2.querySelector(".tag.ble")){
+        const s = document.createElement("span");
+        s.className = "tag ble";
+        s.textContent = "广播名 " + cur;
+        row2.appendChild(s);
+      }
+    });
   });
 }
 
