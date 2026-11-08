@@ -20,7 +20,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -73,6 +75,19 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private Updater.Info pendingUpdate;
     private String lastHeroTitle = "";
 
+    // 独立登录页
+    private ScrollView loginGate;
+    private EditText gatePhone, gateCode;
+    private TextView gateSend, gateHint, gateSkip, banner;
+    private Button gateLogin;
+    private boolean gateSkipped;
+    private long gateCodeSentAt;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    // 连接过程反馈
+    private AlertDialog connectDialog;
+    private ValveManager.ScanItem connectingItem;
+    private String lastOnCharge = "";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -119,6 +134,15 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         deviceCard = findViewById(R.id.deviceCard);
         statsCard = findViewById(R.id.statsCard);
         logCard = findViewById(R.id.logCard);
+        loginGate = findViewById(R.id.loginGate);
+        gatePhone = findViewById(R.id.gatePhone);
+        gateCode = findViewById(R.id.gateCode);
+        gateSend = findViewById(R.id.gateSend);
+        gateLogin = findViewById(R.id.gateLogin);
+        gateHint = findViewById(R.id.gateHint);
+        gateSkip = findViewById(R.id.gateSkip);
+        banner = findViewById(R.id.banner);
+        setupLoginGate();
 
         setupWindow();
         manager.setListener(this);
@@ -135,6 +159,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         waterStatus.setText(running ? "正在放水" : (connected ? "水表已连接" : "状态未知"));
         waterStatus.setTextColor(getColor(running ? R.color.primary : R.color.muted));
         updateHeader();
+        renderWaterStatus();
+        // 没登录又没在放水 → 直接盖独立登录页（放水中要先保证能关水，不拦）
+        if (manager.getSession() == null && !manager.hasOpenSession()) {
+            showLoginGate(true);
+        }
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
@@ -184,8 +213,21 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         btnWater.setOnClickListener(v -> {
             tap(v);
-            if (manager.isRunning()) manager.close("用户关水");
-            else manager.open();
+            if (manager.isRunning()) {
+                manager.close("用户关水");
+                return;
+            }
+            if (manager.getSession() == null) {
+                toast("先登录才能开水");
+                showLoginGate(true);
+                return;
+            }
+            if (!manager.isConnected()) {
+                toast("还没连接水表：先点「扫描水表」");
+                pulseView(btnScan);
+                return;
+            }
+            manager.open();
         });
         btnCopyLog.setOnClickListener(v -> {
             tap(v);
@@ -198,9 +240,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         btnToggleLogin.setOnClickListener(v -> {
             tap(v);
-            boolean show = loginFields.getVisibility() != View.VISIBLE;
-            animateVisibility(loginFields, show);
-            btnToggleLogin.setText(show ? "收起" : "切换账号");
+            // 统一走独立登录页：切账号也是重新登录
+            gateHint.setText("换号登录：填手机号 → 获取验证码 → 自动登录");
+            showLoginGate(true);
         });
         btnToggleLog.setOnClickListener(v -> {
             tap(v);
@@ -823,6 +865,284 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
     }
 
+    // ================= 独立登录页 =================
+
+    private void setupLoginGate() {
+        gatePhone.setText(manager.getPhone());
+        gateSend.setOnClickListener(v -> {
+            tap(v);
+            sendGateCode();
+        });
+        gateLogin.setOnClickListener(v -> {
+            tap(v);
+            doGateLogin();
+        });
+        gateSkip.setOnClickListener(v -> {
+            tap(v);
+            gateSkipped = true;
+            hideLoginGate();
+            toast("没登录不能开水；需要时点「登录」");
+        });
+        // 收到 6 位验证码自动提交：避免「码收到了但忘了点登录」
+        gateCode.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) {
+                String p = gatePhone.getText().toString().trim();
+                if (s.length() == 6 && p.length() == 11 && !manager.isBusy()) {
+                    doGateLogin();
+                }
+            }
+        });
+        gatePhone.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (s.length() == 11) gateHint.setText("点「获取验证码」，收到后会自动登录");
+            }
+        });
+    }
+
+    private void showLoginGate(boolean show) {
+        if (loginGate == null) return;
+        if (!show) {
+            hideLoginGate();
+            return;
+        }
+        gateSkipped = false;
+        loginGate.setVisibility(View.VISIBLE);
+        loginGate.setAlpha(0f);
+        loginGate.animate().alpha(1f).setDuration(180).start();
+        if (gatePhone.getText().toString().trim().isEmpty()) {
+            gatePhone.setText(manager.getPhone());
+        }
+        if (gateHint.getText().toString().isEmpty()) {
+            gateHint.setText("没登录时只能看状态，开不了阀");
+        }
+        gatePhone.requestFocus();
+    }
+
+    private void hideLoginGate() {
+        if (loginGate == null || loginGate.getVisibility() != View.VISIBLE) return;
+        loginGate.animate().alpha(0f).setDuration(150).withEndAction(() -> {
+            loginGate.setVisibility(View.GONE);
+            loginGate.setAlpha(1f);
+        }).start();
+    }
+
+    private void sendGateCode() {
+        String p = gatePhone.getText().toString().trim();
+        if (p.length() != 11) {
+            gateHint.setText("手机号要 11 位");
+            return;
+        }
+        manager.savePhone(p);
+        manager.sendSms(p);
+        gateCodeSentAt = System.currentTimeMillis();
+        gateHint.setText("验证码已发送，收到后会自动登录");
+        gateSend.setEnabled(false);
+        gateSend.setText("60s");
+        countdownGate();
+        gateCode.requestFocus();
+    }
+
+    private void countdownGate() {
+        uiHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                long left = 60 - (System.currentTimeMillis() - gateCodeSentAt) / 1000;
+                if (left <= 0) {
+                    gateSend.setEnabled(true);
+                    gateSend.setText("重新获取");
+                    return;
+                }
+                gateSend.setText(left + "s");
+                uiHandler.postDelayed(this, 1000);
+            }
+        });
+    }
+
+    private void doGateLogin() {
+        String p = gatePhone.getText().toString().trim();
+        String c = gateCode.getText().toString().trim();
+        if (p.length() != 11) {
+            gateHint.setText("手机号要 11 位");
+            return;
+        }
+        if (c.isEmpty()) {
+            gateHint.setText("先填验证码");
+            return;
+        }
+        gateHint.setText("正在登录…");
+        manager.savePhone(p);
+        manager.login(p, c);
+    }
+
+    @Override
+    public void onLogin(boolean ok, String msg) {
+        if (ok) {
+            gateHint.setText("登录成功");
+            hideLoginGate();
+            toast("✓ 登录成功");
+            renderWaterStatus();
+        } else {
+            gateHint.setText("登录失败：" + msg);
+            gateCode.setText("");
+            gateCode.requestFocus();
+        }
+    }
+
+    // ================= 连接反馈 / 状态提示 =================
+
+    private void connectTo(ValveManager.ScanItem item) {
+        if (item == null) return;
+        String name = item.name == null || item.name.isEmpty() ? "水表" : item.name;
+        connectingItem = item;
+        if (connectDialog != null && connectDialog.isShowing()) connectDialog.dismiss();
+        ProgressDialog pd = new ProgressDialog(this);
+        pd.setMessage("正在连接 " + name + " …\n靠近水表，别让官方 App 抢连接");
+        pd.setCancelable(true);
+        pd.setCanceledOnTouchOutside(false);
+        pd.show();
+        connectDialog = pd;
+        manager.connect(item);
+        final long t0 = System.currentTimeMillis();
+        uiHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (connectDialog != pd) return;
+                if (!pd.isShowing()) return;
+                if (manager.isConnected()) {
+                    pd.dismiss();
+                    connectDialog = null;
+                    connected = true;
+                    renderWaterStatus();
+                    toast("✓ 已连接 " + name);
+                    manager.query();
+                    return;
+                }
+                if (System.currentTimeMillis() - t0 > 25000) {
+                    pd.dismiss();
+                    connectDialog = null;
+                    showConnectFailed(item);
+                    return;
+                }
+                uiHandler.postDelayed(this, 350);
+            }
+        });
+    }
+
+    private void showConnectFailed(ValveManager.ScanItem item) {
+        String name = item == null || item.name == null || item.name.isEmpty()
+                ? "水表" : item.name;
+        new AlertDialog.Builder(this)
+                .setTitle("连不上 " + name)
+                .setMessage(explainConnectError(manager.getLastConnectError()))
+                .setPositiveButton("重试", (d, w) -> {
+                    d.dismiss();
+                    connectTo(item);
+                })
+                .setNeutralButton("排查", (d, w) -> {
+                    d.dismiss();
+                    showTroubleshoot();
+                })
+                .setNegativeButton("知道了", (d, w) -> d.dismiss())
+                .show();
+    }
+
+    private String explainConnectError(String err) {
+        String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
+        StringBuilder sb = new StringBuilder();
+        if (e.contains("133")) {
+            sb.append("系统蓝牙报 133（GATT_ERROR）：这台水表大概率已经被别的设备占着。\n\n")
+                    .append("① 关掉手机上官方水控 App —— 它连着表时，别的设备连不上\n")
+                    .append("② 系统蓝牙设置里找到 KLCXKJ-Water，点「断开 / 取消配对」\n")
+                    .append("③ 手机靠近水表 3 米内再试\n");
+        } else if (e.contains("超时") || e.contains("timeout")) {
+            sb.append("连接超时：水表广播稀疏或信号太弱。\n\n")
+                    .append("① 靠近到 3 米内再扫\n")
+                    .append("② 关掉官方 App，别让它抢连接\n")
+                    .append("③ 水表正在放水 / 刷卡时会停止广播，等一会儿再扫\n");
+        } else if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
+            sb.append("连上了但没找到 FF02/FF01 特征：可能连到了别的设备或固件不同。\n\n")
+                    .append("① 确认选的是 KLCXKJ-Water\n")
+                    .append("② 断开后重新扫描再连\n");
+        } else {
+            sb.append("连接失败");
+            if (err != null && !err.isEmpty()) sb.append("：").append(err);
+            sb.append("\n\n常见原因：① 已被官方 App 占用 ② 信号太弱 ③ 水表休眠。\n");
+        }
+        sb.append("\n连上以后如果一直停在「结算中」，点开水会先自动补结算。");
+        return sb.toString();
+    }
+
+    private void showTroubleshoot() {
+        new AlertDialog.Builder(this)
+                .setTitle("连不上水表？按顺序试")
+                .setMessage("① 关掉官方水控 App（趣智校园 / 水控助手）\n"
+                        + "② 系统蓝牙里找到 KLCXKJ-Water，取消配对 / 断开\n"
+                        + "③ 手机贴近水表 3 米内，重新扫描\n"
+                        + "④ 水表在放水 / 刷卡时会停止广播，等它闲下来\n"
+                        + "⑤ 还不行就给水表断电重启（拔电池 / 关空开）\n\n"
+                        + "连上后如果状态是「结算中」，说明上次用水没结算完，"
+                        + "点开水会自动补结算，不用手动处理。")
+                .setPositiveButton("知道了", (d, w) -> d.dismiss())
+                .show();
+    }
+
+    private void pulseView(View v) {
+        if (v == null) return;
+        v.animate().cancel();
+        v.setAlpha(0.45f);
+        v.animate().alpha(1f).setDuration(320).start();
+    }
+
+    private void renderWaterStatus() {
+        if (waterStatus == null) return;
+        String text;
+        int color;
+        if (running) {
+            text = connected ? "放水中 · 点下面按钮关水"
+                    : "放水中 · 连接已断开，正在自动恢复…";
+            color = connected ? R.color.primary : R.color.danger;
+        } else if (!connected) {
+            text = "未连接水表 · 先扫描并连接";
+            color = R.color.muted;
+        } else if ("03".equals(lastOnCharge)) {
+            text = "已连接 · 结算中（点开水会自动补结算）";
+            color = R.color.amber;
+        } else if ("01".equals(lastOnCharge)) {
+            text = "已连接 · 正在放水";
+            color = R.color.primary;
+        } else {
+            text = "已连接 · 空闲，可以开水";
+            color = R.color.success;
+        }
+        waterStatus.setText(text);
+        waterStatus.setTextColor(getColor(color));
+        waterStatus.animate().cancel();
+        waterStatus.setAlpha(0.45f);
+        waterStatus.animate().alpha(1f).setDuration(240).start();
+        updateHeader();
+        updateBanner();
+    }
+
+    private void updateBanner() {
+        if (banner == null) return;
+        String msg = "";
+        if (!connected && manager.hasOpenSession()) {
+            msg = "⚠ 连接断开，水可能还在流 —— 正在自动重连并补结算";
+        } else if (!connected && running) {
+            msg = "⚠ 连接断开，正在自动恢复…";
+        }
+        if (msg.isEmpty()) {
+            banner.setVisibility(View.GONE);
+        } else {
+            banner.setText(msg);
+            banner.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void renderDevice() {
         String name = manager.getDeviceName();
         String m = manager.getMac();
@@ -926,6 +1246,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnScan.setEnabled(!busy);
         btnQuery.setEnabled(!busy);
         btnWater.setEnabled(!busy);
+        if (gateLogin != null) {
+            gateLogin.setEnabled(!busy);
+            gateLogin.setText(busy && label != null && label.contains("登录") ? "登录中…" : "登录");
+        }
+        if (busy && label != null && label.contains("登录") && gateHint != null) {
+            gateHint.setText("正在登录…");
+        }
         if (busy) {
             if (label != null) {
                 if (label.contains("发送")) btnSendCode.setText("发送中…");
@@ -964,10 +1291,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 .withEndAction(() -> btnWater.animate()
                         .scaleX(1f).scaleY(1f).setDuration(140).start())
                 .start();
-        waterStatus.setText(running ? "正在出水 · 通知栏可关水"
-                : (connected ? "水表已连接" : "空闲"));
-        waterStatus.setTextColor(getColor(running ? R.color.primary : R.color.muted));
-        updateHeader();
+        renderWaterStatus();
         if (running) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         } else {
@@ -1027,7 +1351,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 if (!item.bound && item.cloudChecked) {
                     toast("这是附近水表，开阀前请确认不是别人的表");
                 }
-                manager.connect(item);
+                connectTo(item);
             });
             pressScale(tv);
             tv.setAlpha(0f);
@@ -1053,11 +1377,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onQuery(Protocol.Query q) {
         connected = true;
-        waterStatus.setText(q.statusText());
-        waterStatus.setTextColor(getColor("00".equals(q.onCharge)
-                ? R.color.success : R.color.primary));
-        updateHeader();
+        lastOnCharge = q.onCharge == null ? "" : q.onCharge;
+        renderWaterStatus();
         renderDevice();
+        if ("03".equals(lastOnCharge)) {
+            toast("水表在结算中：点「开水」会自动先补结算");
+        }
     }
 
     @Override
@@ -1068,12 +1393,19 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onConnection(boolean connected) {
         this.connected = connected;
-        if (!connected && !running) {
-            waterStatus.setText("未连接水表");
-            waterStatus.setTextColor(getColor(R.color.muted));
+        if (!connected) {
+            lastOnCharge = "";
+            // 用户点了「连接」但失败 → 关掉进度条并给可操作的提示
+            if (connectDialog != null && connectDialog.isShowing()) {
+                connectDialog.dismiss();
+                connectDialog = null;
+                if (connectingItem != null) {
+                    showConnectFailed(connectingItem);
+                }
+            }
         }
         renderDevice();
-        updateHeader();
+        renderWaterStatus();
     }
 
     @Override

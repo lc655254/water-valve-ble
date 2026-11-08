@@ -32,6 +32,7 @@ public final class ValveManager {
         void onQuery(Protocol.Query query);
         void onStats(String text);
         void onConnection(boolean connected);
+        void onLogin(boolean ok, String msg);
     }
 
     public static final class ScanItem {
@@ -110,6 +111,8 @@ public final class ValveManager {
     private long openTs;
     private Protocol.Flow lastFlow;
     private int lastRateOrder;
+    /** 最近一次连接失败的原因（GATT 状态 / 超时），给界面弹「连不上怎么办」用 */
+    private volatile String lastConnectError = "";
 
     private ValveManager(Context ctx) {
         context = ctx;
@@ -151,6 +154,7 @@ public final class ValveManager {
     public boolean isConnected() { return ble.isReady(); }
     public boolean hasOpenSession() { return safetyOpen; }
     public long getOpenTs() { return openTs; }
+    public String getLastConnectError() { return lastConnectError == null ? "" : lastConnectError; }
 
     public void savePhone(String phone) {
         prefs.edit().putString("phone", phone).apply();
@@ -175,6 +179,7 @@ public final class ValveManager {
         if (busy) return;
         setBusy(true, "登录");
         io.execute(() -> {
+            final Listener l = listener;
             try {
                 Cloud.Session s = Cloud.loginByCode(phone, code);
                 try {
@@ -190,9 +195,11 @@ public final class ValveManager {
                         + " · 项目 " + s.projectId
                         + (s.balance.isEmpty() ? "" : " · 余额 " + Cloud.fmtMoney(s.balance) + " 元"));
                 notifySession();
+                if (l != null) main.post(() -> l.onLogin(true, ""));
                 lookupExistingDevices();
             } catch (Exception e) {
                 log("登录失败：" + msg(e));
+                if (l != null) main.post(() -> l.onLogin(false, msg(e)));
             } finally {
                 setBusy(false, "");
             }
@@ -1278,6 +1285,7 @@ public final class ValveManager {
         @Override
         public void onConnected(boolean ok, String msg) {
             if (!ok) {
+                lastConnectError = msg == null ? "" : msg;
                 log(msg);
                 setBusy(false, "");
                 notifyConnection(false);
@@ -1313,6 +1321,7 @@ public final class ValveManager {
         @Override
         public void onReady() {
             stopReconnect();
+            lastConnectError = "";
             main.post(() -> {
                 log("水表已连接");
                 setBusy(false, "");
@@ -1350,6 +1359,7 @@ public final class ValveManager {
 
         @Override
         public void onDisconnected(String msg) {
+            lastConnectError = msg == null ? "" : msg;
             log(msg);
             notifyConnection(false);
             if (safetyOpen || running) {
