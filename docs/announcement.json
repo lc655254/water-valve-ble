@@ -1,10 +1,10 @@
 {
-  "id": "2026-11-01-wechat-pay-02",
+  "id": "2026-11-09-winter-01",
   "enabled": true,
-  "title": "乞讨",
-  "body": "嘿嘿嘿嘿……\n月初了，生活费发了吧？\n我是不是可以讨你要一点money呢？",
+  "title": "降温了，记得多穿点",
+  "body": "冬天来了，大家记得及时添衣，别着凉。\n洗澡注意保暖，温暖过冬，爱你们",
   "images": [
-    "https://raw.githubusercontent.com/lc655254/water-valve-ble/main/docs/announcement/wechat-pay.png"
+    "https://raw.githubusercontent.com/lc655254/water-valve-ble/main/docs/announcement/winter.jpg"
   ],
   "link": "",
   "linkText": "查看详情",
