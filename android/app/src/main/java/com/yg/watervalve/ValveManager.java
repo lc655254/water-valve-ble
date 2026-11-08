@@ -101,6 +101,8 @@ public final class ValveManager {
     private String lastRn = "";
     private String lastRnPre = "";
     private String lastCm = "";
+    /** 设备历次 23 帧报过的 randomNumber（tacTimes），新→旧最多 8 个。 */
+    private final List<String> rnHistory = new ArrayList<>();
     private String mac = "";
     private String deviceName = "";
     private int devId;
@@ -118,6 +120,10 @@ public final class ValveManager {
         lastRn = prefs.getString("last_rn", "");
         lastRnPre = prefs.getString("last_rn_pre", "");
         lastCm = prefs.getString("last_cm", "");
+        for (String s : prefs.getString("rn_hist", "").split(",")) {
+            String r = s.trim().toUpperCase(Locale.ROOT);
+            if (!r.isEmpty() && !rnHistory.contains(r)) rnHistory.add(r);
+        }
         mac = prefs.getString("mac", "");
         bleAddr = prefs.getString("ble_addr", "");
         deviceName = prefs.getString("name", "");
@@ -322,6 +328,7 @@ public final class ValveManager {
             log("设备返回异常 returnCode=" + q.returnCode);
         }
         if (q.deviceIdInt() > 0) devId = q.deviceIdInt();
+        rememberRn(q.tacTimes);
         String m = Protocol.fmtMacHex(q.mac);
         if (m != null && !m.isEmpty()) mac = m;
         saveDevice();
@@ -380,6 +387,7 @@ public final class ValveManager {
             return;
         }
         devId = curDev;
+        rememberRn(q.tacTimes);
         String m = Protocol.fmtMacHex(q.mac);
         if (m != null && !m.isEmpty()) mac = m;
         if (mac == null || mac.isEmpty()) {
@@ -424,10 +432,14 @@ public final class ValveManager {
         for (int i = 1; i <= 5; i++) {
             Thread.sleep(2000);
             Protocol.Query q2 = ble.queryStatus();
+            rememberRn(q2.tacTimes);
+            // 01=放水中、03=结算中：部分固件下单成功后先报 03 再放水，
+            // 所以两者都按「已受理」处理（与旧版/上位机实测一致）。
             if ("01".equals(q2.onCharge) || "03".equals(q2.onCharge)) {
                 running = true;
                 lastRn = q2.tacTimes == null || q2.tacTimes.isEmpty() ? q.tacTimes : q2.tacTimes;
                 lastCm = q.commMode;
+                rememberRn(lastRn);
                 saveDevice();
                 saveSafety();
                 ValveService.scheduleAlarm(context, openTs);
@@ -517,6 +529,7 @@ public final class ValveManager {
                     Protocol.Flow flow = Protocol.parseFlow(collectFull);
                     lastFlow = flow;
                     log("85 采集成功：" + flow.brief());
+                    log("85 原始：" + collectFull);
                     break;
                 }
                 log("85 返回码 " + rc);
@@ -545,17 +558,36 @@ public final class ValveManager {
 
         String collect = collectFull.startsWith("80")
                 ? collectFull.substring(2) : collectFull;
+
+        // 结算前先读一次当前状态：设备此刻报的 tacTimes 才是这条流水绑定的
+        // randomNumber。旧版只用上次开阀存下来的值 —— 设备只要又翻过一次号，
+        // 上传就永远是 226「加密校验失败」（日志里 45080000 从没被试过）。
+        Protocol.Query qNow = null;
+        try {
+            qNow = ble.queryStatus();
+        } catch (Exception e) {
+            log("结算前查询失败：" + msg(e));
+        }
         List<String> rns = new ArrayList<>();
-        if (!lastRn.isEmpty()) rns.add(lastRn);
-        if (!lastRnPre.isEmpty() && !rns.contains(lastRnPre)) rns.add(lastRnPre);
-        String cm = lastCm;
+        if (qNow != null) {
+            addRn(rns, qNow.tacTimes);
+            rememberRn(qNow.tacTimes);
+        }
+        addRn(rns, lastRn);
+        addRn(rns, lastRnPre);
+        for (int i = rnHistory.size() - 1; i >= 0; i--) addRn(rns, rnHistory.get(i));
+        if (qNow != null) addRn(rns, qNow.macTime);   // 最后兜底：个别固件用 macTime 当随机数
+        String cm = (qNow != null && qNow.commMode != null && !qNow.commMode.isEmpty())
+                ? qNow.commMode : lastCm;
         if (rns.isEmpty() || cm == null || cm.isEmpty()) {
             try {
                 Protocol.Query q = ble.queryStatus();
-                if (rns.isEmpty() && q.tacTimes != null && !q.tacTimes.isEmpty()) rns.add(q.tacTimes);
+                addRn(rns, q.tacTimes);
                 if (cm == null || cm.isEmpty()) cm = q.commMode;
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
+        log("结算参数：randomNumber 候选 " + rns + " · commMode=" + cm);
 
         String clData = null;
         try {
@@ -565,6 +597,9 @@ public final class ValveManager {
                 try {
                     clData = Cloud.upload(session, xf, rn, cm);
                     if (clData != null && !clData.isEmpty()) {
+                        lastRn = rn;
+                        rememberRn(rn);
+                        saveDevice();
                         log("账单已上传，randomNumber=" + rn);
                         break;
                     }
@@ -593,7 +628,7 @@ public final class ValveManager {
                     log("86 清账成功（" + c.name + "）");
                     break;
                 }
-                log("86 变体 " + c.name + " 返回码 " + rc);
+                log("86 变体 " + c.name + "（" + c.payload.length() / 2 + "B）返回码 " + rc);
             } catch (Exception e) {
                 log("86 变体 " + c.name + " 无回包");
             }
@@ -1152,6 +1187,23 @@ public final class ValveManager {
         if (reconnectRunnable != null) main.removeCallbacks(reconnectRunnable);
         reconnectRunnable = null;
         reconnectAttempts = 0;
+    }
+
+    /** 记住设备报过的 randomNumber：流水绑定的是哪一次会话不确定，多留几个值兜底。 */
+    private void rememberRn(String rn) {
+        if (rn == null) return;
+        String r = rn.trim().toUpperCase(Locale.ROOT);
+        if (r.isEmpty()) return;
+        rnHistory.remove(r);
+        rnHistory.add(r);
+        while (rnHistory.size() > 8) rnHistory.remove(0);
+        prefs.edit().putString("rn_hist", String.join(",", rnHistory)).apply();
+    }
+
+    private static void addRn(List<String> out, String rn) {
+        if (rn == null) return;
+        String r = rn.trim().toUpperCase(Locale.ROOT);
+        if (!r.isEmpty() && !out.contains(r)) out.add(r);
     }
 
     private void saveDevice() {

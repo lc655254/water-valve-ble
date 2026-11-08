@@ -44,8 +44,13 @@ public final class BleClient {
 
     private static final long SCAN_MS = 15000;
     private static final long CONNECT_MS = 20000;
+    /** 默认 MTU 23 下单次 ATT 写最多 20 字节；超过就要靠长写（Prepare/Execute）整帧下发。 */
+    private static final int ATT_PAYLOAD = 20;
+    /** 长写失败时才退回分片，片间只留很短的空隙（150ms 会被设备判成断帧）。 */
     private static final int CHUNK = 20;
-    private static final long CHUNK_DELAY_MS = 150;
+    private static final long CHUNK_DELAY_MS = 20;
+    /** 官方 App 的帧尾是 '\n'（buildAsciiFrame: '#'+HEX+'\n'），带上更贴近设备解析器。 */
+    private static final byte FRAME_TAIL = (byte) '\n';
 
     private final Context context;
     private final Listener listener;
@@ -61,6 +66,9 @@ public final class BleClient {
     private final Map<String, String> lastNames = new HashMap<>();
     private final Map<String, Long> lastEmit = new HashMap<>();
     private BluetoothGattCharacteristic nameChar;
+    private final Object writeLock = new Object();
+    private volatile boolean writeDone;
+    private volatile int lastWriteStatus = -1;
     private volatile boolean ready;
     private volatile boolean scanning;
     private String selectedName = "";
@@ -291,6 +299,17 @@ public final class BleClient {
         }
 
         @Override
+        public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
+            if (writeChar == null || ch == null) return;
+            if (!writeChar.getUuid().equals(ch.getUuid())) return;
+            lastWriteStatus = status;
+            writeDone = true;
+            synchronized (writeLock) {
+                writeLock.notifyAll();
+            }
+        }
+
+        @Override
         public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic ch) {
             byte[] v = ch.getValue();
             if (v == null || v.length == 0) return;
@@ -376,7 +395,13 @@ public final class BleClient {
     }
 
     private void writeFrame(String frame) throws IOException, InterruptedException {
-        byte[] all = frame.getBytes(StandardCharsets.US_ASCII);
+        byte[] all = (frame + (char) FRAME_TAIL).getBytes(StandardCharsets.US_ASCII);
+        // 整帧一次写：官方 App 就是这么发的（writeCharacteristic 一整帧），
+        // 超过 MTU-3 时由 Android 协议栈自动走长写（Prepare/Execute），
+        // 模块把整帧当一次 UART 包转给 MCU —— 这是 86 清账能过的前提。
+        if (writeWhole(all)) return;
+        // 长写不被支持（特征只有无响应写 / 模块拒长写）才退回分片
+        listener.onLog("整帧写入失败，退回 " + CHUNK + " 字节分片（" + all.length + "B）");
         for (int off = 0; off < all.length; off += CHUNK) {
             byte[] part = Arrays.copyOfRange(all, off, Math.min(off + CHUNK, all.length));
             boolean ok = false;
@@ -392,6 +417,51 @@ public final class BleClient {
             if (!ok) throw new IOException("GATT 写入失败");
             Thread.sleep(CHUNK_DELAY_MS);
         }
+    }
+
+    /** 整帧一次写入；成功返回 true（已确认写完成或已排入无响应写队列）。 */
+    private boolean writeWhole(byte[] all) throws InterruptedException {
+        if (writeChar == null || gatt == null) return false;
+        int props = writeChar.getProperties();
+        boolean canDefault = (props & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0;
+        boolean canNoResp = (props & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0;
+        // 长帧必须用带响应的写，协议栈才会拆成 Prepare Write + Execute Write
+        int type = (canDefault || all.length <= ATT_PAYLOAD)
+                ? BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                : BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE;
+        if (type == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT && !canDefault && canNoResp) {
+            if (all.length > ATT_PAYLOAD) return false;
+            type = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE;
+        }
+        writeChar.setWriteType(type);
+        writeDone = false;
+        lastWriteStatus = -1;
+        boolean queued;
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                queued = gatt.writeCharacteristic(writeChar, all, type)
+                        == android.bluetooth.BluetoothStatusCodes.SUCCESS;
+            } else {
+                writeChar.setValue(all);
+                queued = gatt.writeCharacteristic(writeChar);
+            }
+        } catch (SecurityException e) {
+            throw new IllegalStateException("缺少蓝牙写入权限");
+        } catch (Exception e) {
+            return false;
+        }
+        if (!queued) return false;
+        if (type == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+            Thread.sleep(60);
+            return true;
+        }
+        long deadline = System.currentTimeMillis() + 3000;
+        synchronized (writeLock) {
+            while (!writeDone && System.currentTimeMillis() < deadline) {
+                writeLock.wait(50);
+            }
+        }
+        return writeDone && lastWriteStatus == BluetoothGatt.GATT_SUCCESS;
     }
 
     public Protocol.Query queryStatus() throws Exception {
