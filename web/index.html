@@ -169,7 +169,8 @@ select:focus,input:focus{border-color:var(--accent);
   box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
 select{cursor:pointer}
 .btn{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius-xs);
-  padding:9px 13px;font-size:12.5px;font-family:var(--font);cursor:pointer;transition:var(--t);white-space:nowrap}
+  padding:9px 13px;font-size:12.5px;font-family:var(--font);cursor:pointer;transition:var(--t);white-space:nowrap;
+  text-align:center}
 .btn:hover:not(:disabled){background:var(--surface-2);border-color:var(--muted-2)}
 .btn:active:not(:disabled){transform:translateY(1px)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
@@ -937,7 +938,10 @@ async function checkAnnouncement(){
   }
   announcement = r.data;
   if (btn){
-    btn.style.display = "inline-flex";
+    // 只清掉内联的 display:none，回到 .btn 的默认 display。
+    // 以前这里写 display:inline-flex，按钮变成 flex 容器，文字被当 flex item
+    // 顶到左边，跟「省钱账本 / 本月账单 / 检查更新」的居中排版不一致。
+    btn.style.display = "";
     btn.onclick = () => showAnnouncement(announcement);
   }
   let seen = "";
