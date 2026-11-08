@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 蓝牙水库 · 水控 Web 版  WaterValveBLE_Web.py
 =================================================
@@ -71,7 +71,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.10"
+APP_VERSION = "1.0.11"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================

@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 cd /d "%~dp0"
 if not exist "dist\蓝牙水库安全版\蓝牙水库安全版.exe" (
   echo 先运行 build_onedir.bat
@@ -16,7 +16,7 @@ if not exist "%ISCC%" (
   exit /b 1
 )
 "%ISCC%" "installer\water_valve.iss"
-if exist "installer\Output\蓝牙水库_Setup_v1.0.10.exe" copy /y "installer\Output\蓝牙水库_Setup_v1.0.10.exe" "蓝牙水库_Setup_v1.0.10.exe" >nul
+if exist "installer\Output\蓝牙水库_Setup_v1.0.11.exe" copy /y "installer\Output\蓝牙水库_Setup_v1.0.11.exe" "蓝牙水库_Setup_v1.0.11.exe" >nul
 pause
 
 
