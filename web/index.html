@@ -859,8 +859,24 @@ function annEsc(s){
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
 }
+// 公告与新手教程互斥：公告先出，用户关掉后再放教程，避免两层叠在一起
+let annDone = false;      // 公告流程是否已经结束（没公告 / 已关闭）
+let tourWanted = false;   // 首启想放教程
+
+function announcementFinished(){
+  annDone = true;
+  setTimeout(tourWantedNow, 350);      // 等弹窗淡出再放教程
+}
+
+function tourWantedNow(){
+  if (!tourWanted || tourOn || state.onboarded) return;
+  if (!annDone) return;                                   // 公告还没处理完
+  if ($("modal").classList.contains("show")) return;       // 还有弹窗开着
+  startTour();
+}
+
 function showAnnouncement(a){
-  if (!a) return;
+  if (!a) return Promise.resolve();
   let html = '<div class="annbody">' + annEsc(a.body || "") + "</div>";
   (a.images || []).forEach(u => {
     if (!/^https:\/\//i.test(u)) return;
@@ -875,10 +891,11 @@ function showAnnouncement(a){
     }});
   }
   buttons.push({label: a.button || "我知道了", primary:true});
-  dialog({title: a.title || "公告", body: html, buttons, wide:true, ann:true}).then(() => {
+  return dialog({title: a.title || "公告", body: html, buttons, wide:true, ann:true}).then(() => {
     if (a.once !== false){
       try{ localStorage.setItem("wv-ann-seen", a.id || ""); }catch(e){}
     }
+    announcementFinished();
   });
 }
 async function checkAnnouncement(){
@@ -886,6 +903,7 @@ async function checkAnnouncement(){
   const btn = $("btnAnnouncement");
   if (!r || !r.ok || !r.data){
     if (btn) btn.style.display = "none";
+    announcementFinished();          // 没公告：教程可以正常开始
     return;
   }
   announcement = r.data;
@@ -904,10 +922,14 @@ async function checkAnnouncement(){
   }
   let seen = "";
   try{ seen = localStorage.getItem("wv-ann-seen") || ""; }catch(e){}
-  if (announcement.once !== false && seen === announcement.id) return;
+  if (announcement.once !== false && seen === announcement.id){
+    announcementFinished();          // 这条看过了：不挡教程
+    return;
+  }
   const tryShow = () => {
     const busy = $("modal").classList.contains("show")
-              || $("scanMask").classList.contains("show");
+              || $("scanMask").classList.contains("show")
+              || tourOn;             // 教程在放：别把公告糊上去
     if (busy){ setTimeout(tryShow, 1200); return; }
     showAnnouncement(announcement);
   };
@@ -2035,6 +2057,10 @@ function tourNext(){
 function startTour(){
   if (tourOn) return;
   if (splashOn){ onSplashEnd(startTour); return; }   // 开屏还在放：等它放完再开始
+  if ($("modal").classList.contains("show")){        // 还有弹窗（公告等）开着：等它关
+    setTimeout(tourWantedNow, 800);
+    return;
+  }
   tourOn = true; tourIdx = 0;
   $("tour").classList.add("show");
   tourPlace();
@@ -2155,9 +2181,14 @@ function runWelcome(){
   let s = await api("/api/state", undefined, {retry:2, retryDelay:1200});
   if (s && s.ok) paintState(s);
   startPolling();
-  // 第一次运行就播一遍新手教程；看过教程的老用户则弹一次更新日志（看过永不再弹）
-  if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 400));
-  else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600));
+  // 第一次运行就播一遍新手教程（等公告先处理完，别两层叠一起）；
+  // 看过教程的老用户则弹一次更新日志（看过永不再弹）
+  if (!state.onboarded) {
+    tourWanted = true;
+    onSplashEnd(()=>setTimeout(tourWantedNow, 400));
+  } else {
+    onSplashEnd(()=>setTimeout(maybeShowChangelog, 600));
+  }
 })();
 
 /* 状态轮询 + 日志轮询：界面一出来就跑，
