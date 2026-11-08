@@ -52,11 +52,11 @@ t_page = (time.perf_counter() - t2) * 1000
 
 print(f"模块导入        : {t_import * 1000:7.0f} ms")
 print(f"HTTP 就绪       : {ready * 1000:7.0f} ms")
-print(f"/api/state      : {t_state:7.1f} ms  ok={st.get('ok')} 免激活={not st.get('need_activation')} license={st.get('license')}")
+print(f"/api/state      : {t_state:7.1f} ms  ok={st.get('ok')}  v{st.get('app_version')}")
 print(f"首页 index.html : {t_page:7.1f} ms  HTTP {page.status_code}  {len(page.content) // 1024} KB")
 print(f"进程常驻内存    : 见任务管理器（无 WebView2 时约 90-130 MB）")
 
-ok = (st.get("ok") is True and st.get("need_activation") is False
+ok = (st.get("ok") is True
       and page.status_code == 200 and len(page.content) > 50000)
 print("\n结论：" + ("启动链路正常 ✅" if ok else "有问题 ❌"))
 sys.exit(0 if ok else 1)

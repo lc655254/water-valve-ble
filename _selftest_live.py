@@ -64,8 +64,8 @@ if st is None:
 
 print("[A] 基础状态")
 check("ok", st.get("ok") is True)
-check("免激活", st.get("need_activation") is False, f"license={st.get('license')}")
-check("已登录", st.get("account") == "13800000000", str(st.get("account")))
+check("无许可字段", "license" not in st and "need_activation" not in st)
+check("已登录", st.get("account") == "13236239712", str(st.get("account")))
 check("余额", st.get("balance") is not None, str(st.get("balance")))
 check("设备档案", bool((st.get("device_info") or {}).get("place")),
       str((st.get("device_info") or {}).get("place")))
