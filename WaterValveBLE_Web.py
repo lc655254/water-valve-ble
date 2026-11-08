@@ -71,7 +71,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.12"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
