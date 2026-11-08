@@ -60,7 +60,7 @@ APP_DIR = wv._data_dir()      # 只读安装位置自动回退 %LOCALAPPDATA%\�
 WEB_DIR = os.path.join(_res_dir(), "web")
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.17"
+APP_VERSION = "1.0.18"
 
 
 # ================= 用水统计上报（只报统计，不报账号密码） =================

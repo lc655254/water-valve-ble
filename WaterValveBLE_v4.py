@@ -2236,18 +2236,21 @@ def clear_payload_candidates(collect_hex, clear_code=None, full=None, prefer=Non
     # 取的是 respData 前 22 字节，而 respData 第 1 字节就是 0x80 状态位。
     # 旧实现只给「去 status」的采集数据，整串比设备手里的流水错开 1 字节，
     # 设备一律回 0x81（数据不符）。所以含 status 的形态必须排在前面。
+    official = []
     hf = norm_hex(full) if full else ""
     if hf:
         if len(hf) >= 44:
-            cands.append(("含status前22B(官方)", hf[:44]))
-        cands.append(("含status全长", hf))
+            official.append(("含status前22B(官方)", hf[:44]))
+        official.append(("含status全长", hf))
         if len(hf) >= 46:
-            cands.append(("含status前23B", hf[:46]))
+            official.append(("含status前23B", hf[:46]))
         if len(hf) >= 82:
-            cands.append(("含status前41B", hf[:82]))
+            official.append(("含status前41B", hf[:82]))
         base = min(FLOW_BASE_LEN, len(hf) // 2)
         if base > 0:
-            cands.append((f"含status基础{FLOW_BASE_LEN}B", hf[:base * 2]))
+            official.append((f"含status基础{FLOW_BASE_LEN}B", hf[:base * 2]))
+
+    cands = official + cands          # 官方形态优先，去 status 的旧变体留作兜底
 
     if prefer:
         cands.sort(key=lambda t: 0 if t[0] == prefer else 1)
