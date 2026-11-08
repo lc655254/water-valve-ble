@@ -71,7 +71,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.12"
+APP_VERSION = "1.0.13"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -1156,11 +1156,11 @@ def _fetch_announcement():
     now = time.time()
     if ANN_CACHE["data"] is not None and now - ANN_CACHE["ts"] < 8:
         return ANN_CACHE["data"]
-    prefixes = ("", "https://gh-proxy.com/", "https://ghproxy.net/")
+    prefixes = ANN_MIRRORS
     for prefix in prefixes:
         try:
             url = prefix + ANN_URL + "?t=" + str(int(now * 1000))
-            r = requests.get(url, timeout=7, headers={
+            r = requests.get(url, timeout=5, headers={
                 "User-Agent": "WaterValve-PC",
                 "Accept": "application/json",
             })
@@ -1184,6 +1184,12 @@ def api_announcement():
 
 
 ANN_IMG_CACHE = {}
+ANN_IMG_DIR = os.path.join(APP_DIR, "ann_cache")
+# 国内直连 raw.githubusercontent 经常几秒起步甚至超时，镜像排前面；直连留作最后兜底
+ANN_IMG_MIRRORS = ("https://gh-proxy.com/", "https://ghfast.top/",
+                   "https://ghproxy.net/", "")
+ANN_MIRRORS = ("https://gh-proxy.com/", "https://ghfast.top/",
+               "https://ghproxy.net/", "")
 
 
 def _ann_allowed_image(url):
@@ -1191,9 +1197,77 @@ def _ann_allowed_image(url):
             and "raw.githubusercontent.com/lc655254/water-valve-ble/" in url)
 
 
+def _ann_img_paths(url):
+    h = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    base = os.path.join(ANN_IMG_DIR, h)
+    return base + ".img", base + ".type"
+
+
+def _ann_img_disk_get(url):
+    """本地磁盘缓存：公告图拉过一次就不再联网，重启也还在。"""
+    p, m = _ann_img_paths(url)
+    try:
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                data = f.read()
+            ctype = "image/png"
+            if os.path.exists(m):
+                with open(m, encoding="utf-8") as f:
+                    ctype = f.read().strip() or ctype
+            return data, ctype
+    except Exception:
+        pass
+    return None
+
+
+def _ann_img_disk_put(url, data, ctype):
+    try:
+        os.makedirs(ANN_IMG_DIR, exist_ok=True)
+        p, m = _ann_img_paths(url)
+        with open(p, "wb") as f:
+            f.write(data)
+        with open(m, "w", encoding="utf-8") as f:
+            f.write(ctype)
+    except Exception:
+        pass
+
+
+def _ann_fetch_one(prefix, url, timeout=6.0):
+    r = requests.get(prefix + url, timeout=timeout, headers={
+        "User-Agent": "WaterValve-PC", "Accept": "image/*"})
+    if r.status_code != 200 or not r.content:
+        return None
+    ct = (r.headers.get("Content-Type") or "image/png").split(";")[0]
+    if not ct.startswith("image/"):
+        ct = "image/png"
+    return r.content, ct
+
+
+def _ann_fetch_image(url):
+    """多镜像并发抢第一份：谁先回来用谁，国内基本 1 秒内出图。"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    ex = ThreadPoolExecutor(max_workers=len(ANN_IMG_MIRRORS))
+    futs = [ex.submit(_ann_fetch_one, p, url) for p in ANN_IMG_MIRRORS]
+    try:
+        for f in as_completed(futs, timeout=10):
+            try:
+                got = f.result()
+            except Exception:
+                continue
+            if got:
+                for x in futs:
+                    x.cancel()
+                return got
+    except Exception:
+        pass
+    finally:
+        ex.shutdown(wait=False)
+    return None
+
+
 @app.route("/api/announcement/image")
 def api_announcement_image():
-    """公告图片走本地代理：WebView 不直连 GitHub，避免图片偶发加载失败。"""
+    """公告图片走本地代理：WebView 不直连 GitHub；镜像并发 + 内存/磁盘缓存。"""
     url = request.args.get("url", "")
     if not _ann_allowed_image(url):
         return Response(status=400)
@@ -1201,24 +1275,16 @@ def api_announcement_image():
     if cached:
         return Response(cached[0], mimetype=cached[1],
                         headers={"Cache-Control": "public, max-age=86400"})
-    prefixes = ("", "https://gh-proxy.com/", "https://ghproxy.net/")
-    for prefix in prefixes:
-        try:
-            r = requests.get(prefix + url, timeout=10, headers={
-                "User-Agent": "WaterValve-PC", "Accept": "image/*"})
-            if r.status_code != 200 or not r.content:
-                continue
-            ct = (r.headers.get("Content-Type") or "image/png").split(";")[0]
-            if not ct.startswith("image/"):
-                ct = "image/png"
-            ANN_IMG_CACHE[url] = (r.content, ct)
-            if len(ANN_IMG_CACHE) > 20:
-                ANN_IMG_CACHE.pop(next(iter(ANN_IMG_CACHE)))
-            return Response(r.content, mimetype=ct,
-                            headers={"Cache-Control": "public, max-age=86400"})
-        except Exception:
-            continue
-    return Response(status=404)
+    got = _ann_img_disk_get(url) or _ann_fetch_image(url)
+    if not got:
+        return Response(status=404)
+    data, ct = got
+    ANN_IMG_CACHE[url] = (data, ct)
+    if len(ANN_IMG_CACHE) > 20:
+        ANN_IMG_CACHE.pop(next(iter(ANN_IMG_CACHE)))
+    _ann_img_disk_put(url, data, ct)
+    return Response(data, mimetype=ct,
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.route("/api/copy", methods=["POST"])

@@ -23,6 +23,8 @@ try{
   --ok:#059669; --warn:#d97706;
   --log-bg:#fff; --log-fg:#475467;
   --radius:14px; --radius-sm:10px; --radius-xs:8px;
+  /* 自定义标题栏高度：弹窗遮罩从它下面开始，否则弹窗顶部会被标题栏盖住（标题被切） */
+  --topbar-h:46px;
   --shadow:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
   --shadow-sm:0 1px 2px rgba(16,24,40,.06);
   --ease:cubic-bezier(.25,.1,.15,1); --t:.18s var(--ease);
@@ -69,7 +71,7 @@ input,textarea,#log{user-select:text}
 
 /* ── 标题栏（仅拖拽区可拖动窗口） ── */
 /* z-index 高于弹窗遮罩：扫描/弹窗期间窗口依然可以拖动（方便把电脑挪近水表） */
-.titlebar{position:relative;z-index:400;height:46px;display:flex;align-items:center;gap:8px;
+.titlebar{position:relative;z-index:400;height:var(--topbar-h);display:flex;align-items:center;gap:8px;
   padding:0 8px 0 14px;background:var(--surface);border-bottom:1px solid var(--border)}
 .drag{display:flex;align-items:center;gap:9px;height:100%;padding:0 6px;cursor:default}
 .titlebar .brand{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:8px}
@@ -262,27 +264,29 @@ select{cursor:pointer}
 .logempty{color:var(--muted);font-style:italic}
 
 /* ── 弹窗 ── */
-.mask{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);
+.mask{position:fixed;left:0;right:0;top:var(--topbar-h);bottom:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);
   display:none;align-items:center;justify-content:center;z-index:300;padding:14px;
-  box-sizing:border-box;overflow:auto}
+  box-sizing:border-box;overflow:hidden}
 .mask.show{display:flex}
 .dialog{width:380px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px;margin:auto;
   /* 内容再长也不会把标题/按钮顶出屏幕：弹窗自身限高，正文区滚动 */
-  max-height:calc(100vh - 28px);display:flex;flex-direction:column;overflow:hidden;
+  max-height:calc(100vh - var(--topbar-h) - 28px);display:flex;flex-direction:column;overflow:hidden;
   animation:pop .18s var(--ease)}
 .dialog.wide{width:660px;max-width:calc(100vw - 32px)}
 /* 选择设备这类「列表型」弹窗：高度固定，列表占满中间并自己滚动，
    标题/提示/按钮都不动 —— 设备多少台都不会把版面顶歪 */
-.dialog.tall{height:min(600px,calc(100vh - 28px));width:660px;max-width:calc(100vw - 32px)}
+.dialog.tall{height:min(600px,calc(100vh - var(--topbar-h) - 28px));width:660px;max-width:calc(100vw - 32px)}
 /* 公告：标题/正文居中，图片完整等比显示 */
 .dialog.ann{width:660px;max-width:calc(100vw - 32px)}
 .dialog.ann h2{text-align:center;font-size:22px;margin:2px 0 8px}
 .dialog.ann .annbody{text-align:center;font-size:14px;line-height:2;white-space:pre-wrap;color:var(--text)}
-.dialog.ann .annimg{max-height:420px;margin:14px auto 2px}
+/* 图片高度跟着窗口走：小窗口也不会把标题/按钮顶出可视区（之前固定 420px，
+   弹窗被 max-height 截断后标题会被挤到上面看不见） */
+.dialog.ann .annimg{max-height:min(420px, calc(100vh - var(--topbar-h) - 250px));margin:14px auto 2px}
 /* 省钱账本：加宽、放大卡片、放松行距 */
 .dialog.stats{width:720px;max-width:calc(100vw - 32px)}
-.dialog.stats #mBody{max-height:calc(100vh - 245px)}
+.dialog.stats #mBody{max-height:calc(100vh - var(--topbar-h) - 245px)}
 .dialog.stats .stat-grid{gap:10px;margin:10px 0 4px}
 .dialog.stats .stat-grid>div{padding:8px 8px}
 .dialog.stats .stat-grid b{font-size:14.5px}
@@ -937,6 +941,12 @@ async function checkAnnouncement(){
     return;
   }
   announcement = r.data;
+  // 预取公告图：等用户点「公告」时图已经在本地缓存里，打开就是完整版面
+  (announcement.images || []).forEach(u => {
+    if (!/^https:\/\//i.test(u)) return;
+    const im = new Image();
+    im.src = "/api/announcement/image?url=" + encodeURIComponent(u);
+  });
   if (btn){
     // 只清掉内联的 display:none，回到 .btn 的默认 display。
     // 以前这里写 display:inline-flex，按钮变成 flex 容器，文字被当 flex item
