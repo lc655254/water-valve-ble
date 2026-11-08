@@ -71,7 +71,7 @@ LIC_ENDPOINTS = [
 DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.13"
+APP_VERSION = "1.0.14"
 
 
 # ================= 秘钥许可（与 Tk 版一致） =================
@@ -2135,6 +2135,53 @@ def api_scan_result():
                              "heard": HUNT["heard"],
                              "elapsed": int(time.time() - HUNT["started"])
                                         if HUNT["started"] else 0}})
+
+
+@app.route("/api/device/names", methods=["POST"])
+def api_device_names():
+    """给扫描列表批量补云端档案名（宿舍 / 楼层 / 房间）。
+
+    手机上之所以能直接看到「热水表25-X4公寓…430房」，是因为登录态下逐台查了
+    /device/info/mac；电脑端原来只给「疑似水表」补名字，没登录时干脆没有。
+    这里把列表里所有 MAC 都查一遍（并发 + 缓存），没登录则明确告诉前端。
+    """
+    d = request.get_json(silent=True) or {}
+    macs = []
+    for m in (d.get("macs") or []):
+        u = str(m or "").upper().strip()
+        if u and u not in macs:
+            macs.append(u)
+    macs = macs[:24]
+    s = SESSION.get("s")
+    if not macs or not s:
+        return jsonify({"ok": True, "logged_in": bool(s), "names": {}})
+
+    def one(mac):
+        info = cloud_device_info(mac) or {}
+        if not info:
+            return mac, None
+        full = info.get("deviceName") or info.get("DevName") or ""
+        place = "".join(str(x) for x in (
+            info.get("buildingName") or info.get("LDName") or "",
+            info.get("floorName") or info.get("LCName") or "",
+            info.get("roomName") or info.get("FJName") or "") if x)
+        if not (full or place):
+            return mac, None
+        return mac, {"full": full, "place": place,
+                     "room": info.get("roomName") or info.get("FJName") or ""}
+
+    out = {}
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for mac, v in ex.map(one, macs):
+                if v:
+                    out[mac] = v
+    except Exception as e:
+        print(f"[!] 批量查云端名称失败：{type(e).__name__}: {e}")
+    if out:
+        print(f"[*] 扫描列表云端名称：{len(out)}/{len(macs)} 台命中")
+    return jsonify({"ok": True, "logged_in": True, "names": out})
 
 
 @app.route("/api/device/select", methods=["POST"])
