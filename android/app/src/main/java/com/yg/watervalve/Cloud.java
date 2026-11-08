@@ -195,6 +195,8 @@ public final class Cloud {
         if (data != null) {
             r.downData = data.optString("downData", "");
             r.rate = data.optInt("rate", 0);
+            // 下单时云端记录的用量计数：关阀结算时用它做差，才是「本次用了多少」
+            r.useCount = data.optInt("useCount", -1);
             r.raw = data.toString();
         }
         if (r.downData.isEmpty()) throw new ApiException(-1, "云端没有返回 downData");
@@ -299,6 +301,7 @@ public final class Cloud {
     public static final class RateOrder {
         public String downData = "";
         public int rate;
+        public int useCount = -1;
         public String raw = "";
     }
 

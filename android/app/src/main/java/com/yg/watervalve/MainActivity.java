@@ -61,7 +61,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private TextView btnXiaolian;
     private TextView btnNotice;
     private Announcement.Info currentNotice;
-    private LinearLayout deviceList, header, bottomBar, loginFields, logBody;
+    private LinearLayout deviceList, header, bottomBar, loginFields, logBody, statHistory;
     private ScrollView logScroll;
     private View statusBarScrim, root;
     private ScrollView scroll;
@@ -123,6 +123,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnXiaolian = findViewById(R.id.btnXiaolian);
         btnNotice = findViewById(R.id.btnNotice);
         deviceList = findViewById(R.id.deviceList);
+        statHistory = findViewById(R.id.statHistory);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
         statusBarScrim = findViewById(R.id.statusBarScrim);
@@ -213,6 +214,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         btnWater.setOnClickListener(v -> {
             tap(v);
+            if (manager.isBusy()) return;          // 按钮不再禁用，这里挡重复点击
             if (manager.isRunning()) {
                 manager.close("用户关水");
                 return;
@@ -926,15 +928,33 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         if (gateHint.getText().toString().isEmpty()) {
             gateHint.setText("没登录时只能看状态，开不了阀");
         }
-        gatePhone.requestFocus();
     }
 
     private void hideLoginGate() {
         if (loginGate == null || loginGate.getVisibility() != View.VISIBLE) return;
+        hideIme();
         loginGate.animate().alpha(0f).setDuration(150).withEndAction(() -> {
             loginGate.setVisibility(View.GONE);
             loginGate.setAlpha(1f);
         }).start();
+    }
+
+    /** 收起键盘并把焦点从输入框上摘掉：否则点底部按钮时键盘一收，页面会被带着滚一下 */
+    private void hideIme() {
+        try {
+            if (gateCode != null) gateCode.clearFocus();
+            if (gatePhone != null) gatePhone.clearFocus();
+            if (loginGate != null) {
+                loginGate.clearFocus();
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager)
+                                getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.hideSoftInputFromWindow(loginGate.getWindowToken(), 0);
+                }
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void sendGateCode() {
@@ -1179,6 +1199,36 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             statTotalMain.setText(t.group(2) + " L");
             statTotalSub.setText(t.group(1) + " 次 · 省 ¥" + t.group(3));
         }
+        renderHistory();
+    }
+
+    /** 省钱账本下面的「最近记录」：时间 · 用量 · 时长 · 省下 */
+    private void renderHistory() {
+        if (statHistory == null) return;
+        statHistory.removeAllViews();
+        org.json.JSONArray arr = manager.recentSessions(5);
+        if (arr.length() == 0) return;
+        TextView head = new TextView(this);
+        head.setText("最近记录");
+        head.setTextSize(10);
+        head.setTextColor(getColor(R.color.muted));
+        head.setPadding(0, 0, 0, dp(4));
+        statHistory.addView(head);
+        SimpleDateFormat f = new SimpleDateFormat("MM-dd HH:mm", Locale.CHINA);
+        for (int i = arr.length() - 1; i >= 0; i--) {
+            org.json.JSONObject r = arr.optJSONObject(i);
+            if (r == null) continue;
+            String when = f.format(new Date(r.optLong("ts", 0)));
+            TextView row = new TextView(this);
+            row.setText(String.format(Locale.CHINA, "%s · %s%.2f L · %d 秒 · 省 ¥%.3f",
+                    when, r.optBoolean("estimated", false) ? "约 " : "",
+                    r.optDouble("liters", 0), r.optInt("seconds", 0),
+                    r.optDouble("saved", 0)));
+            row.setTextSize(11.5f);
+            row.setTextColor(getColor(R.color.ink));
+            row.setPadding(0, dp(3), 0, dp(3));
+            statHistory.addView(row);
+        }
     }
 
     private void updateHeader() {
@@ -1248,11 +1298,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     @Override
     public void onBusy(boolean busy, String label) {
+        final int sy = scroll == null ? 0 : scroll.getScrollY();
         btnSendCode.setEnabled(!busy);
         btnLogin.setEnabled(!busy);
         btnScan.setEnabled(!busy);
         btnQuery.setEnabled(!busy);
-        btnWater.setEnabled(!busy);
+        // 开水/关水不禁用：禁用会让焦点乱跳、整页跟着滚；重复点击在点击回调里挡
         if (gateLogin != null) {
             gateLogin.setEnabled(!busy);
             gateLogin.setText(busy && label != null && label.contains("登录") ? "登录中…" : "登录");
@@ -1283,10 +1334,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             btnWater.setBackgroundResource(running
                     ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
         }
+        if (scroll != null) scroll.post(() -> {
+            if (scroll.getScrollY() == 0 && sy > 0) scroll.scrollTo(0, sy);   // 只修「被顶回顶部」，不抢用户的滚动
+        });
     }
 
     @Override
     public void onWater(boolean running) {
+        final int sy = scroll == null ? 0 : scroll.getScrollY();
         this.running = running;
         btnWater.setText(running ? "关水" : "开水");
         btnWater.setBackgroundResource(running
@@ -1304,6 +1359,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         } else {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
+        if (scroll != null) scroll.post(() -> {
+            if (scroll.getScrollY() == 0 && sy > 0) scroll.scrollTo(0, sy);   // 只修「被顶回顶部」，不抢用户的滚动
+        });
     }
 
     @Override
@@ -1314,6 +1372,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onDevices(List<ValveManager.ScanItem> devices) {
         deviceList.removeAllViews();
+        if (connected) return;          // 已经连上了就不再显示列表
         for (int i = 0; i < devices.size(); i++) {
             ValveManager.ScanItem item = devices.get(i);
             TextView tv = new TextView(this);
@@ -1400,6 +1459,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onConnection(boolean connected) {
         this.connected = connected;
+        if (connected) {
+            // 连上以后列表就没用了：清掉，别再占着屏幕
+            if (deviceList != null) deviceList.removeAllViews();
+            btnScan.setText("重新扫描");
+        }
         if (!connected) {
             lastOnCharge = "";
             // 用户点了「连接」但失败 → 关掉进度条并给可操作的提示

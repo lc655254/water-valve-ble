@@ -111,6 +111,8 @@ public final class ValveManager {
     private long openTs;
     private Protocol.Flow lastFlow;
     private int lastRateOrder;
+    /** 下单时云端返回的 useCount；关阀时用「设备计数 − 它」算本次真实用量 */
+    private int lastOrderUseCount = -1;
     /** 最近一次连接失败的原因（GATT 状态 / 超时），给界面弹「连不上怎么办」用 */
     private volatile String lastConnectError = "";
 
@@ -132,6 +134,7 @@ public final class ValveManager {
         deviceName = prefs.getString("name", "");
         devId = prefs.getInt("dev_id", 0);
         clearPref = prefs.getString("clear_pref", "");
+        lastOrderUseCount = prefs.getInt("order_use_count", -1);
         safetyOpen = prefs.getBoolean("safety_open", false);
         openTs = prefs.getLong("safety_open_ts", 0L);
         running = safetyOpen;
@@ -415,6 +418,8 @@ public final class ValveManager {
         openTs = System.currentTimeMillis();
         lastFlow = null;
         lastRateOrder = ro.rate;
+        lastOrderUseCount = ro.useCount;
+        prefs.edit().putInt("order_use_count", ro.useCount).apply();
         lastRnPre = q.tacTimes;
         lastRn = q.tacTimes;
         lastCm = q.commMode;
@@ -668,7 +673,24 @@ public final class ValveManager {
         int count = lastFlow.useCountI;
         int rate = lastFlow.rate2I > 0 ? lastFlow.rate2I : lastFlow.rate1I;
         if (rate <= 0) rate = lastRateOrder;
-        double liters = Math.max(0.0, count * 0.5);
+
+        // 本次用量 = 设备计数 − 下单时云端 useCount（跟 PC 版同一套口径）。
+        // 只拿设备累计计数会把历史用量重复算进来，看起来就像「每次固定 1 升」。
+        int delta = count;
+        String basis;
+        boolean estimated = false;
+        if (lastOrderUseCount >= 0 && count >= lastOrderUseCount) {
+            delta = count - lastOrderUseCount;
+            basis = "设备计数 − 云端 useCount";
+        } else {
+            basis = "设备计数（无云端对照）";
+        }
+        double liters = Math.max(0.0, delta * 0.5);
+        if (liters <= 0 && seconds > 0) {
+            liters = seconds / 60.0 * 12.0;      // 计数拿不到时按 12 L/min 估算
+            estimated = true;
+            basis = "按 " + seconds + " 秒 × 12 L/min 估算";
+        }
         double byUse = liters * rate / 1000.0;
         double charge = Math.max(byUse, 0.025);
         try {
@@ -677,6 +699,10 @@ public final class ValveManager {
             rec.put("start", start);
             rec.put("seconds", seconds);
             rec.put("count", count);
+            rec.put("cloud_count", lastOrderUseCount);
+            rec.put("delta", delta);
+            rec.put("estimated", estimated);
+            rec.put("basis", basis);
             rec.put("liters", round3(liters));
             rec.put("rate", rate);
             rec.put("official", round4(charge));
@@ -686,10 +712,13 @@ public final class ValveManager {
             JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
             arr.put(rec);
             while (arr.length() > 200) arr.remove(0);
-            prefs.edit().putString("ledger", arr.toString()).apply();
+            prefs.edit().putString("ledger", arr.toString())
+                    .putInt("order_use_count", -1).apply();
+            lastOrderUseCount = -1;      // 这一单已经结掉，别带到下一单
             log(String.format(Locale.CHINA,
-                    "账本：%d 计数 → %.3f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥0 · 省 ¥%.3f",
-                    count, liters, seconds, rate, charge, charge));
+                    "账本：计数 %d（云端 %d）→ %s%.3f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥0 · 省 ¥%.3f",
+                    count, lastOrderUseCount, estimated ? "约 " : "",
+                    liters, seconds, rate, charge, charge));
             notifyStats();
         } catch (Exception e) {
             log("账本记录失败：" + msg(e));
@@ -711,12 +740,28 @@ public final class ValveManager {
             int sec = last == null ? 0 : last.optInt("seconds", 0);
             double l = last == null ? 0 : last.optDouble("liters", 0);
             double s = last == null ? 0 : last.optDouble("saved", 0);
+            double off = last == null ? 0 : last.optDouble("official", 0);
             return String.format(Locale.CHINA,
-                    "本次：%d 秒 · %.3f L · 省 ¥%.3f\n累计：%d 次 · %.3f L · 省 ¥%.3f",
-                    sec, l, s, arr.length(), liters, saved);
+                    "本次：%d 秒 · %.3f L · 省 ¥%.3f（官方应扣 ¥%.3f · 实扣 ¥0）\n"
+                            + "累计：%d 次 · %.3f L · 省 ¥%.3f",
+                    sec, l, s, off, arr.length(), liters, saved);
         } catch (Exception e) {
             return "账本：读取失败";
         }
+    }
+
+    /** 最近 n 笔账（给界面画「最近记录」用，旧→新） */
+    public JSONArray recentSessions(int n) {
+        JSONArray out = new JSONArray();
+        try {
+            JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
+            for (int i = Math.max(0, arr.length() - n); i < arr.length(); i++) {
+                JSONObject r = arr.optJSONObject(i);
+                if (r != null) out.put(r);
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
     }
 
     private void notifyStats() {
