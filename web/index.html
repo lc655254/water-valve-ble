@@ -284,9 +284,10 @@ select{cursor:pointer}
 /* 图片高度跟着窗口走：小窗口也不会把标题/按钮顶出可视区（之前固定 420px，
    弹窗被 max-height 截断后标题会被挤到上面看不见） */
 .dialog.ann .annimg{max-height:min(420px, calc(100vh - var(--topbar-h) - 250px));margin:14px auto 2px}
-/* 省钱账本：加宽、放大卡片、放松行距 */
+/* 省钱账本：加宽、放大卡片、放松行距；高度跟着内容走（不再用 tall 定死，
+   否则内容少的时候底部会留一大块空白） */
 .dialog.stats{width:720px;max-width:calc(100vw - 32px)}
-.dialog.stats #mBody{max-height:calc(100vh - var(--topbar-h) - 245px)}
+.dialog.stats #mBody{max-height:calc(100vh - var(--topbar-h) - 150px)}
 .dialog.stats .stat-grid{gap:10px;margin:10px 0 4px}
 .dialog.stats .stat-grid>div{padding:8px 8px}
 .dialog.stats .stat-grid b{font-size:14.5px}
@@ -1571,7 +1572,6 @@ async function showStats(){
     desc: "只读设备流水与云端返回，不上传真实用量、不产生扣费",
     wide: true,
     stats: true,
-    tall: true,
     body: `
       <div class="stat-hero">
         <div class="num"><small>¥</small>${yuanTxt(r.total_saved)}</div>
