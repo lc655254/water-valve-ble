@@ -517,6 +517,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
 
         for (String url : info.images) {
+            TextView ph = new TextView(this);
+            ph.setText("图片加载中…");
+            ph.setTextSize(12);
+            ph.setTextColor(getColor(R.color.muted));
+            ph.setPadding(0, dp(12), 0, dp(4));
+            content.addView(ph);
+
             ImageView image = new ImageView(this);
             image.setAdjustViewBounds(true);
             image.setMaxHeight(dp(360));
@@ -526,9 +533,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = dp(10);
+            lp.topMargin = dp(6);
             content.addView(image, lp);
-            Announcement.loadImage(this, url, image);
+            Announcement.loadImage(this, url, image, ph);
         }
 
         box.addView(scroll, new LinearLayout.LayoutParams(

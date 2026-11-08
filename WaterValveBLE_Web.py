@@ -58,94 +58,9 @@ def _res_dir():
 
 APP_DIR = wv._data_dir()      # 只读安装位置自动回退 %LOCALAPPDATA%\蓝牙水库
 WEB_DIR = os.path.join(_res_dir(), "web")
-LIC_FILE = os.path.join(APP_DIR, "license.json")
-# 许可服务器地址：界面上不显示、也不用手填 —— 内置几个候选，谁通用谁。
-#   ① 公网隧道（异地也能激活/续期）  ② 本机直连（隧道没开时兜底）
-LIC_ENDPOINTS = [
-    # 顺序：先本机（连不上是毫秒级失败），再公网隧道 —— 远端用户只有隧道那条能通
-    "http://127.0.0.1:26921",                  # 本机（隧道转发目标端口）
-    "http://127.0.0.1:8900",                   # 本机（老端口，兼容）
-    "http://7fa4ee7e0404.ofalias.com:46700",   # 内网穿透：公网 → 本机 26921
-    "http://26.10.23.68:26921",                # Radmin VPN 里的服务器（隧道挂了也能用）
-]
-DEFAULT_SERVER = LIC_ENDPOINTS[-1]
 PORT = 18800
 API_PORT = int(os.environ.get("WV_API_PORT", "18801"))
-APP_VERSION = "1.0.14"
-
-
-# ================= 秘钥许可（与 Tk 版一致） =================
-def machine_id():
-    h = hashlib.sha256(f"wvkey|{uuid.getnode()}".encode()).hexdigest()[:16].upper()
-    return "-".join(h[i:i + 4] for i in range(0, 16, 4))
-
-
-def load_lic():
-    try:
-        with open(LIC_FILE, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) and d.get("key") else None
-    except Exception:
-        return None
-
-
-def save_lic(d):
-    with open(LIC_FILE, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
-
-
-def _ping(server, timeout=4):
-    """探一下这个许可服务器通不通（/api/ping），返回 (ok, 延迟秒)"""
-    import requests
-    t0 = time.time()
-    try:
-        r = requests.get(server.rstrip("/") + "/api/ping", timeout=timeout)
-        if r.status_code == 200:
-            return True, round(time.time() - t0, 3)
-    except Exception:
-        pass
-    return False, None
-
-
-def pick_server(preferred="", log=print):
-    """挑一个能用的许可服务器：优先上次用过的，其次内置候选（隧道 → 本机）。
-
-    界面不显示地址，也不用手填；这里自动选。
-    """
-    cands = []
-    for s in [preferred] + LIC_ENDPOINTS:
-        s = (s or "").rstrip("/")
-        if s and s not in cands:
-            cands.append(s)
-    for s in cands:
-        ok, ms = _ping(s)
-        if ok:
-            if s != preferred:
-                log(f"[*] 许可服务器已选：{s}（{ms}s）")
-            return s
-    return ""
-
-
-def check_license(server, key):
-    import requests
-    try:
-        r = requests.post(server.rstrip("/") + "/api/verify",
-                          json={"key": key, "machine": machine_id()}, timeout=8)
-        d = r.json()
-    except Exception as e:
-        return False, 0, f"连不上许可服务器（{e}）"
-    if d.get("code") == 0:
-        return True, d["data"]["days_left"], ""
-    return False, 0, d.get("message", "校验失败")
-
-
-def check_license_any(preferred, key):
-    """在所有候选地址里找一个能通的来校验（隧道优先，本机兜底）"""
-    srv = pick_server(preferred)
-    if not srv:
-        return False, 0, "连不上许可服务器（公网隧道与本机都没响应，请确认秘钥服务器已启动）", ""
-    ok, days, msg = check_license(srv, key)
-    return ok, days, msg, srv
+APP_VERSION = "1.0.15"
 
 
 # ================= 用水统计上报（只报统计，不报账号密码） =================
@@ -158,24 +73,6 @@ def report_usage(force=False):
     保留函数签名，避免其它调用点报错。
     """
     return False
-
-
-LIC_DAYS = [0]          # 剩余天数（列表便于闭包修改）
-LIC_SERVER = [DEFAULT_SERVER]
-LIC_CHECKING = [False]      # 许可校验进行中（前端据此稍微等一下，别闪秘钥页）
-LIC_READY = [False]         # 校验是否已经出结果
-
-
-def license_boot():
-    """本地自用版：直接放行，不连任何许可服务器、不校验秘钥。
-
-    原逻辑（联网校验 / 3 天离线宽限 / 过期弹激活页）已整体停用。
-    """
-    LIC_DAYS[0] = 9999
-    LIC_READY[0] = True
-    LIC_CHECKING[0] = False
-    print("[*] 本地自用版：已跳过秘钥校验（无限期）")
-    return True
 
 
 # ================= 工作线程（asyncio + BLE，串行执行） =================
@@ -1001,15 +898,8 @@ def snapshot():
         "last_action": dict(ACT_RESULT),          # 最近一次操作的真实结果
         "water_running": WATER["running"],        # 出水状态：True 正在放水 / False 空闲 / None 未知
         "water_age": (int(time.time() - WATER["ts"]) if WATER["ts"] else None),
-        "license": 9999,
         "app_version": APP_VERSION,
-        # 本地自用版：不再回填任何旧秘钥
-        "last_key": "",
         "accounts": accounts,
-        "need_activation": False,
-        "lic_checking": False,
-        "lic_ready": True,
-        "server": "",
     }
 
 
@@ -1186,8 +1076,6 @@ def api_announcement():
 ANN_IMG_CACHE = {}
 ANN_IMG_DIR = os.path.join(APP_DIR, "ann_cache")
 # 国内直连 raw.githubusercontent 经常几秒起步甚至超时，镜像排前面；直连留作最后兜底
-ANN_IMG_MIRRORS = ("https://gh-proxy.com/", "https://ghfast.top/",
-                   "https://ghproxy.net/", "")
 ANN_MIRRORS = ("https://gh-proxy.com/", "https://ghfast.top/",
                "https://ghproxy.net/", "")
 
@@ -1232,8 +1120,23 @@ def _ann_img_disk_put(url, data, ctype):
         pass
 
 
-def _ann_fetch_one(prefix, url, timeout=6.0):
-    r = requests.get(prefix + url, timeout=timeout, headers={
+def _ann_img_candidates(url):
+    """同一条 raw 链接的多条线路：jsDelivr 国内最快，其次 GitHub 代理，最后直连。"""
+    out = []
+    prefix = "https://raw.githubusercontent.com/"
+    if url.startswith(prefix):
+        parts = url[len(prefix):].split("/", 3)
+        if len(parts) == 4:
+            for host in ("cdn.jsdelivr.net", "fastly.jsdelivr.net", "gcore.jsdelivr.net"):
+                out.append(f"https://{host}/gh/{parts[0]}/{parts[1]}@{parts[2]}/{parts[3]}")
+    for p in ("https://gh-proxy.com/", "https://ghfast.top/", "https://ghproxy.net/"):
+        out.append(p + url)
+    out.append(url)
+    return out
+
+
+def _ann_fetch_one(u, timeout=6.0):
+    r = requests.get(u, timeout=timeout, headers={
         "User-Agent": "WaterValve-PC", "Accept": "image/*"})
     if r.status_code != 200 or not r.content:
         return None
@@ -1244,10 +1147,11 @@ def _ann_fetch_one(prefix, url, timeout=6.0):
 
 
 def _ann_fetch_image(url):
-    """多镜像并发抢第一份：谁先回来用谁，国内基本 1 秒内出图。"""
+    """多线路并发抢第一份：谁先回来用谁，国内基本 1 秒内出图。"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    ex = ThreadPoolExecutor(max_workers=len(ANN_IMG_MIRRORS))
-    futs = [ex.submit(_ann_fetch_one, p, url) for p in ANN_IMG_MIRRORS]
+    cands = _ann_img_candidates(url)
+    ex = ThreadPoolExecutor(max_workers=min(4, len(cands)))
+    futs = [ex.submit(_ann_fetch_one, u) for u in cands]
     try:
         for f in as_completed(futs, timeout=10):
             try:
@@ -1432,35 +1336,6 @@ def api_logs():
     since = max(since, start)
     lines = list(LOGS)[since - start:]
     return jsonify({"lines": lines, "next": total})
-
-
-LAST_KEY_FILE = os.path.join(APP_DIR, "last_key.json")
-
-
-def save_last_key(key, server=""):
-    """记下最近一次激活成功的秘钥（license.json 被删/过期后，激活页还能预填）"""
-    try:
-        with open(LAST_KEY_FILE, "w", encoding="utf-8") as f:
-            json.dump({"key": key, "server": server, "ts": time.time()},
-                      f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def load_last_key():
-    try:
-        with open(LAST_KEY_FILE, encoding="utf-8") as f:
-            return (json.load(f) or {}).get("key") or ""
-    except Exception:
-        return ""
-
-
-@app.route("/api/activate", methods=["POST"])
-def api_activate():
-    """本地自用版：不需要秘钥，前端万一调用也直接返回成功。"""
-    LIC_DAYS[0] = 9999
-    LIC_READY[0] = True
-    return jsonify({"ok": True, "days": 9999})
 
 
 @app.route("/api/login/send_code", methods=["POST"])
@@ -2804,28 +2679,16 @@ def main():
         wv.CFG["mode"] = "ble"
         wv.save_config()
         print("[*] 控制方式已固定为蓝牙（BLE）")
-    # 许可校验放后台线程：先把窗口开出来（界面自己的开屏动画先跑），
-    # 校验期间 /api/state 会带 lic_checking=true，前端等结果再决定要不要弹秘钥页。
-    global LIC_CHECKING
-    LIC_CHECKING[0] = True
-
-    def _lic_job():
+    # 恢复会话 + 自动连水表放后台线程：先把窗口开出来（界面自己的开屏动画先跑）
+    def _boot_job():
         try:
-            allowed = license_boot()
-            if allowed:
-                print(f"[*] 许可有效，剩余 {LIC_DAYS[0]} 天")
-                _mark("许可校验完成")
-                # 许可 OK 才恢复会话 + 自动连水表（窗口这时早出来了）
-                restore_session()
-                time.sleep(0.8)
-                auto_connect()
-            else:
-                print("[!] 未激活 —— 请在界面中输入秘钥激活")
-        finally:
-            LIC_CHECKING[0] = False
-            LIC_READY[0] = True
+            restore_session()
+            time.sleep(0.8)
+            auto_connect()
+        except Exception as e:                   # noqa: BLE001
+            print(f"[!] 启动恢复失败：{type(e).__name__}: {e}")
 
-    threading.Thread(target=_lic_job, daemon=True).start()
+    threading.Thread(target=_boot_job, daemon=True).start()
     # 放水期间的链路看门狗：掉线自动重连，保证「关水」还能零用量结算
     threading.Thread(target=_link_watchdog, daemon=True).start()
     # 注意：start_flask() 内部是 waitress.serve（阻塞），必须放线程里

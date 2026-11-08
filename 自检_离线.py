@@ -83,14 +83,13 @@ check("开阀前置补结算走零用量", "zero_usage=True" in src_idle)
 src_settle = inspect.getsource(wv.ble_settle)
 check("ble_settle 有拦截闸", "ALLOW_REAL_BILL" in src_settle)
 
-print("\n[4] Web 后端：免秘钥")
+print("\n[4] Web 后端：无许可/无秘钥")
 t1 = time.perf_counter()
 import WaterValveBLE_Web as web
 t_web = time.perf_counter() - t1
 check("Web 模块导入", True, f"{t_web * 1000:.0f} ms")
-check("license_boot 不再联网", "check_license_any" not in inspect.getsource(web.license_boot))
-check("license_boot 直接放行", web.license_boot() is True)
-check("剩余天数", web.LIC_DAYS[0] == 9999, str(web.LIC_DAYS[0]))
+check("许可代码已删除", not hasattr(web, "license_boot") and not hasattr(web, "LIC_DAYS"))
+check("激活接口已删除", "api_activate" not in dir(web))
 
 client = web.app.test_client()
 t2 = time.perf_counter()
@@ -98,12 +97,12 @@ r = client.get("/api/state")
 dt = (time.perf_counter() - t2) * 1000
 d = r.get_json() or {}
 check("/api/state 可用", r.status_code == 200 and d.get("ok") is True, f"{dt:.1f} ms")
-check("不要求激活", d.get("need_activation") is False)
-check("许可天数 = 9999", d.get("license") == 9999)
+check("state 里没有许可字段", "license" not in d and "need_activation" not in d)
 check("接口不阻塞（<200ms）", dt < 200, f"{dt:.1f} ms")
 
 r2 = client.post("/api/activate", json={})
-check("/api/activate 直接成功", (r2.get_json() or {}).get("ok") is True)
+# 静态路由是 /<path>，未知 POST 会落到它身上报 405；重点是接口已经不在了
+check("/api/activate 已下线", r2.status_code in (404, 405), str(r2.status_code))
 
 print("\n[5] 结算链路仿真（假设备 + 假云端，不碰真表/真钱）")
 import asyncio
@@ -197,7 +196,7 @@ def _boom(*a, **k):
 wv.CFG["last_dev_id"] = 317
 wv.ble_rate_order = _boom
 with contextlib.redirect_stdout(io.StringIO()):
-    opened = asyncio.run(wv.ble_open(OtherMeter(), {"projectId": 1,
+    opened = asyncio.run(wv.ble_open(OtherMeter(), {"projectId": 1036,
                                                    "loginCode": "x", "userId": 1,
                                                    "telephone": "1", "accountId": 1}))
 check("deviceId 不符 → 开阀中止", opened is False)
