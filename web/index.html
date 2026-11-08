@@ -871,7 +871,6 @@ function announcementFinished(){
 function tourWantedNow(){
   if (!tourWanted || tourOn || state.onboarded) return;
   if (!annDone) return;                                   // 公告还没处理完
-  if ($("modal").classList.contains("show")) return;       // 还有弹窗开着
   startTour();
 }
 
@@ -899,7 +898,9 @@ function showAnnouncement(a){
   });
 }
 async function checkAnnouncement(){
-  const r = await api("/api/announcement", undefined, {timeout:15000, retry:1});
+  let r = null;
+  try { r = await api("/api/announcement", undefined, {timeout:15000, retry:1}); }
+  catch(e){ r = null; }
   const btn = $("btnAnnouncement");
   if (!r || !r.ok || !r.data){
     if (btn) btn.style.display = "none";
@@ -2054,13 +2055,16 @@ function tourNext(){
   if (tourIdx >= TOUR_STEPS.length){ endTour(true); return; }
   tourPlace();
 }
+let tourWaitTries = 0;
 function startTour(){
   if (tourOn) return;
   if (splashOn){ onSplashEnd(startTour); return; }   // 开屏还在放：等它放完再开始
-  if ($("modal").classList.contains("show")){        // 还有弹窗（公告等）开着：等它关
-    setTimeout(tourWantedNow, 800);
+  // 还有弹窗（公告等）开着：等它关，最多等 20 次（约 16 秒）后强制开始
+  if ($("modal").classList.contains("show") && tourWaitTries++ < 20){
+    setTimeout(startTour, 800);
     return;
   }
+  tourWaitTries = 0;
   tourOn = true; tourIdx = 0;
   $("tour").classList.add("show");
   tourPlace();
