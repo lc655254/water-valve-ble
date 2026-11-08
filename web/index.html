@@ -473,37 +473,6 @@ select{cursor:pointer}
    原来固定在屏幕下方会挡住日志，现在做成标题栏里那颗「灵动岛」：
    平时显示连接/放水状态，有提示时原地展开，过几秒自己收回去。 */
 
-/* ── 激活 ── */
-/* 首次使用：全屏欢迎式激活页（大 logo 居中，下面是表单）
-   z-index 特意压在标题栏(400)之下：这样秘钥页显示时，右上角的
-   最小化 / 关闭按钮和拖拽区照样能用（无边框窗口，用户得有地方关它） */
-#gate{position:fixed;inset:0;background:var(--bg);display:none;place-items:center;z-index:350;
-  padding:18px;box-sizing:border-box;overflow:auto}
-#gate.show{display:grid;animation:gateIn .32s var(--ease)}
-@keyframes gateIn{from{opacity:0}to{opacity:1}}
-/* 填秘钥时标题栏只留最小化/关闭：许可天数、主题色、深浅色这些跟首次激活无关，
-   而且许可天数那时还是占位符（🔑 --），显示出来只会让人以为出错了 */
-.gating #licChip,
-.gating #btnAccent,
-.gating #btnTheme{display:none !important}
-.gatecard{width:460px;max-width:100%;display:flex;flex-direction:column;align-items:center;
-  text-align:center;background:transparent;border:0;box-shadow:none;padding:0}
-.gateico{width:86px !important;height:86px !important;border-radius:26px !important;cursor:default;
-  box-shadow:0 18px 52px color-mix(in srgb,var(--accent) 42%,transparent);
-  animation:dropIn .7s var(--spring) both}
-.gateico svg{width:44px !important;height:44px !important}
-.gatecard h1{font-size:22px;margin:20px 0 6px;color:var(--text);letter-spacing:.5px;
-  animation:fadeUp .6s var(--ease) .1s both}
-.gatedesc{font-size:13px;color:var(--muted);margin:0 0 22px;
-  animation:fadeUp .6s var(--ease) .18s both}
-.gatepanel{width:100%;background:var(--surface);border:1px solid var(--border);
-  border-radius:18px;box-shadow:var(--shadow);padding:22px 24px 18px;text-align:left;
-  animation:fadeUp .6s var(--ease) .24s both}
-.gatecard .field{margin-bottom:0}
-.gatecard .hint{min-height:18px;margin:8px 0 10px}
-.gatebtn{width:100%;height:44px;font-size:14.5px;border-radius:12px}
-.gatequit{display:none}
-
 /* ── 新手教程：中间一块「挖空」的遮罩 + 气泡 ── */
 #tour{position:fixed;inset:0;z-index:900;display:none}
 #tour.show{display:block}
@@ -564,7 +533,6 @@ select{cursor:pointer}
       <span class="itext" id="islandText">启动中…</span>
     </div>
   </div>
-  <span class="chip" id="licChip">🔑 许可 …</span>
   <button class="iconbtn" id="btnAccent" title="更换主题色">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
          stroke-linecap="round" stroke-linejoin="round">
@@ -691,27 +659,6 @@ select{cursor:pointer}
     <div class="actions-row" id="mActs"></div>
   </div>
 </div>
-<div id="gate">
-  <div class="gatecard">
-    <span class="brandmark gateico" id="gateIcon">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>
-      </svg>
-    </span>
-    <h1>蓝牙水库 · 智能水阀控制</h1>
-    <p class="gatedesc">首次使用需要填写秘钥，填过之后就不再弹出</p>
-    <div class="gatepanel">
-      <div class="field"><label>秘钥</label>
-        <input id="gKey" placeholder="WV-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false"
-               autocomplete="off" maxlength="26"></div>
-      <div class="hint" id="gHint"></div>
-      <button class="btn primary gatebtn" id="btnActivate">激活并开始使用</button>
-    </div>
-    <div class="gatequit hide"></div>
-  </div>
-</div>
-
 <!-- 新手教程：聚光高亮 + 气泡说明 -->
 <div id="tour">
   <div class="tour-hole" id="tourHole"></div>
@@ -855,11 +802,11 @@ function islandIdle(){
     }
   }, 420);
 }
-/* 胶囊不能挤到左边品牌名和右边许可/按钮上，按实际宽度算可用空间 */
+/* 胶囊不能挤到左边品牌名和右边按钮上，按实际宽度算可用空间 */
 function layoutIsland(){
   const bar = document.querySelector(".titlebar");
   const brand = document.querySelector(".titlebar .brand");
-  const chip = $("licChip");
+  const chip = $("btnAccent");
   if (!bar || !brand || !chip) return;
   const r = bar.getBoundingClientRect(), a = brand.getBoundingClientRect(),
         c = chip.getBoundingClientRect();
@@ -959,8 +906,7 @@ async function checkAnnouncement(){
   if (announcement.once !== false && seen === announcement.id) return;
   const tryShow = () => {
     const busy = $("modal").classList.contains("show")
-              || $("scanMask").classList.contains("show")
-              || $("gate").classList.contains("show");
+              || $("scanMask").classList.contains("show");
     if (busy){ setTimeout(tryShow, 1200); return; }
     showAnnouncement(announcement);
   };
@@ -1024,8 +970,6 @@ function paintState(s){
   $("sDev").textContent  = s.device || "未选择";
   $("sBt").textContent   = s.connected ? "已连接" : "未连接";
   $("sDot").className    = "dot " + (s.connected ? "on" : "off");
-  $("licChip").textContent = s.license > 0 ? ("🔑 许可剩余 " + s.license + " 天") : "🔑 许可异常";
-  $("licChip").className = "chip " + (s.license > 0 ? "ok" : "bad");
   // 设备名：本地别名 > 云端档案名（官方同款接口）> 广播名 > MAC
   const di = s.device_info || {};
   state.deviceInfo = di;
@@ -2039,53 +1983,7 @@ function pyApi(name, fallback){
 on("btnMin",   ()=>pyApi("minimize_window"));
 on("btnClose", ()=>pyApi("close_window", ()=>window.close()));
 
-/* 激活 */
-function normKey(v){
-  // 只留大写字母数字，按 WV-XXXXX-XXXXX-XXXXX-XXXXX 分组（本项目的秘钥是 5 位一组）
-  const s = (v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const head = s.startsWith("WV") ? "WV" : "";
-  const body = (head ? s.slice(2) : s).slice(0, 20);
-  const parts = body.match(/.{1,5}/g) || [];
-  return (head ? [head, ...parts] : parts).join("-");
-}
-$("gKey").addEventListener("input", e => {
-  const p = e.target.selectionStart, before = e.target.value.length;
-  e.target.value = normKey(e.target.value);
-  const after = e.target.value.length;
-  try { e.target.setSelectionRange(p + (after - before), p + (after - before)); } catch(_){}
-});
-$("gKey").addEventListener("keydown", e => { if (e.key === "Enter") $("btnActivate").click(); });
-
-on("btnActivate", async ()=>{
-  const key = $("gKey").value.trim();          // 地址不填了：后端自动挑一个能通的许可服务器
-  const h = $("gHint");
-  if (!key){ h.textContent = "请填写秘钥"; h.className = "hint bad"; $("gKey").focus(); return; }
-  if (key.replace(/-/g, "").length < 18){ h.textContent = "秘钥看起来不完整（应为 WV-XXXXX-XXXXX-XXXXX-XXXXX）"; h.className = "hint bad"; return; }
-  h.textContent = "正在校验（自动选择可用线路）…"; h.className = "hint";
-  $("btnActivate").disabled = true;
-  const r = await api("/api/activate", {key}, {timeout:30000, retry:1});
-  $("btnActivate").disabled = false;
-  $("btnActivate").disabled = false;
-  if (r && r.ok){
-    h.textContent = "✓ 激活成功，剩余 " + (r.days || "?") + " 天";
-    h.className = "hint good";
-    logNote("✓ 秘钥激活成功（剩余 " + (r.days || "?") + " 天）", "ok");
-    setTimeout(async ()=>{
-      $("gate").classList.remove("show");
-      document.documentElement.classList.remove("gating");
-      await startPolling();          // 关键：激活后把状态/日志轮询开起来
-      refresh();
-      // 激活之后按顺序接上新手教程（同样等开屏结束）
-      if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 600));
-      else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600));
-    }, 700);
-  } else {
-    h.textContent = (r && r.msg) || "激活失败，请检查秘钥或服务器地址";
-    h.className = "hint bad";
-  }
-});
-
-/* ── 新手教程（首次激活后自动播放；点标题栏的许可天数可以重看） ── */
+/* ── 新手教程（首次运行自动播放） ── */
 const TOUR_STEPS = [
   {sel:".statusrow", title:"状态一览",
    desc:"账号、余额、设备名、蓝牙连接状态都在这条上，扫一眼就知道现在能不能用。"},
@@ -2100,7 +1998,7 @@ const TOUR_STEPS = [
   {sel:"#log", title:"运行日志",
    desc:"默认只显示人话。想看原始帧、校验值，点上面的「🔍 详细」；右上角还有自动滚动 / 复制 / 清空。"},
   {sel:"#btnAccent", title:"外观：主题色与深浅色",
-   desc:"🎨 换主题色（水蓝 / 青碧 / 翠绿…），旁边的 🌙 切深浅色，选完会记住，下次打开还是它。浏览器打开时点这里的许可天数还能重看本教程。"}
+   desc:"🎨 换主题色（水蓝 / 青碧 / 翠绿…），旁边的 🌙 切深浅色，选完会记住，下次打开还是它。"}
 ];
 let tourIdx = 0, tourOn = false;
 
@@ -2137,9 +2035,6 @@ function tourNext(){
 function startTour(){
   if (tourOn) return;
   if (splashOn){ onSplashEnd(startTour); return; }   // 开屏还在放：等它放完再开始
-  // 还在填秘钥（首次使用）时不要弹教程 —— 标题栏在激活页之上，
-  // 点许可天数之类的会误触发，教程就会盖在秘钥页上
-  if ($("gate") && $("gate").classList.contains("show")) return;
   tourOn = true; tourIdx = 0;
   $("tour").classList.add("show");
   tourPlace();
@@ -2157,10 +2052,6 @@ function endTour(finished){
 on("tourNext", tourNext);
 on("tourSkip", ()=>endTour(false));
 window.addEventListener("resize", ()=>{ if (tourOn) tourPlace(); });
-$("licChip").addEventListener("click", ()=>{      // 点许可天数 = 重看教程（填秘钥那页不触发）
-  if ($("gate") && $("gate").classList.contains("show")) return;
-  tourOn = false; startTour();
-});
 
 /* ── 更新日志（人话版）：新版本第一次打开弹一次，看过就永远不再弹 ── */
 const CHANGELOG_VER = "4.8";       // 改了内容就换版本号，比如 "4.9"
@@ -2262,45 +2153,15 @@ function runWelcome(){
   islandIdle();
   window.addEventListener("resize", ()=>{ layoutIsland(); if (!islandShowing()) islandIdle(); });
   let s = await api("/api/state", undefined, {retry:2, retryDelay:1200});
-  if (s && s.need_activation && s.lic_checking && !s.lic_ready){
-    // 许可校验还在后台跑（启动时不再等网络）：先等结果，别闪一下秘钥页
-    for (let i = 0; i < 40; i++){
-      await new Promise(r => setTimeout(r, 400));
-      const t = await api("/api/state");
-      if (!t) continue;
-      if (!t.lic_checking || t.lic_ready){ s = t; break; }
-    }
-    if (!s.need_activation){ if (s.ok) paintState(s); startPolling();
-      if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 400));
-      else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600)); return; }
-  }
-  if (s && s.need_activation){
-    // 首次使用：必须先填秘钥（没有跳过按钮）；而且**要等开屏动画放完再显示**，
-    // 否则这块全屏深色页会盖在开屏动画上，看着就像只剩一个 logo 飘在角落。
-    if (s.last_key){                       // 上次用过的秘钥预填，省得再翻出来
-      $("gKey").value = normKey(s.last_key);
-      $("gHint").textContent = "已填入上次使用的秘钥，点「激活并开始使用」即可";
-      $("gHint").className = "hint";
-    } else {
-      $("gHint").textContent = "";
-    }
-    onSplashEnd(()=>setTimeout(()=>{
-      $("gate").classList.add("show");
-      document.documentElement.classList.add("gating");   // 标题栏收起许可/主题按钮
-      if (!$("gKey").value) setTimeout(()=>$("gKey").focus(), 120);
-    }, 60));
-    return;                     // 先填秘钥；激活成功后会 startPolling() 把状态/日志跑起来
-  }
   if (s && s.ok) paintState(s);
   startPolling();
-  // 已经激活：第一次运行就播一遍新手教程；看过教程的老用户则弹一次更新日志（看过永不再弹）
+  // 第一次运行就播一遍新手教程；看过教程的老用户则弹一次更新日志（看过永不再弹）
   if (!state.onboarded) onSplashEnd(()=>setTimeout(startTour, 400));
   else onSplashEnd(()=>setTimeout(maybeShowChangelog, 600));
 })();
 
-/* 状态轮询 + 日志轮询：激活页期间不跑；激活成功后必须调用一次，
-   否则界面会「卡住」——顶部一直是未连接、余额是 --、日志面板空白
-   （之前就是激活后直接 return，轮询永远没起来，用户以为程序挂了） */
+/* 状态轮询 + 日志轮询：界面一出来就跑，
+   否则会「卡住」——顶部一直是未连接、余额是 --、日志面板空白 */
 async function startPolling(){
   if (state.polling) return;
   state.polling = true;

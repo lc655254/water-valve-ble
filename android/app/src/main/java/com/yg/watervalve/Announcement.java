@@ -8,7 +8,9 @@ import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,8 +26,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** GitHub 托管的公告：docs/announcement.json + docs/announcement/ 图片。 */
 public final class Announcement {
@@ -35,6 +41,7 @@ public final class Announcement {
     private static final String K_SEEN = "announcement_seen";
     private static final String K_IMG_FP = "announcement_img_fp";
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+    private static final ExecutorService IMG = Executors.newFixedThreadPool(4);
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private Announcement() {}
@@ -69,6 +76,7 @@ public final class Announcement {
                     info = parse(app, new JSONObject(text));
                     writeCache(app, text);
                     syncImageCache(app, info);
+                    prefetchImages(app, info);
                 } catch (Exception e) {
                     error = e.getClass().getSimpleName();
                 }
@@ -127,12 +135,11 @@ public final class Announcement {
     private static String fetch(String url) {
         // 带时间戳绕过 GitHub raw / gh-proxy 的 CDN 缓存
         String fresh = url + (url.contains("?") ? "&" : "?") + "t=" + System.currentTimeMillis();
-        String[] prefixes = {"", "https://gh-proxy.com/", "https://ghproxy.net/"};
-        for (String p : prefixes) {
+        for (String u : rawCandidates(fresh)) {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(p + fresh).openConnection();
-                c.setConnectTimeout(7000);
-                c.setReadTimeout(7000);
+                HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+                c.setConnectTimeout(4000);
+                c.setReadTimeout(6000);
                 c.setRequestProperty("User-Agent", "WaterValve-Android");
                 c.setRequestProperty("Accept", "application/json");
                 int code = c.getResponseCode();
@@ -149,10 +156,38 @@ public final class Announcement {
         return null;
     }
 
+    /**
+     * 同一条 raw 链接的多条线路：jsDelivr 在国内通常最快，其次 GitHub 代理，最后直连。
+     * raw.githubusercontent.com/u/r/branch/path → cdn.jsdelivr.net/gh/u/r@branch/path
+     */
+    private static List<String> rawCandidates(String url) {
+        List<String> out = new ArrayList<>();
+        String prefix = "https://raw.githubusercontent.com/";
+        if (url.startsWith(prefix)) {
+            String[] parts = url.substring(prefix.length()).split("/", 4);
+            if (parts.length == 4) {
+                for (String host : new String[]{"cdn.jsdelivr.net", "fastly.jsdelivr.net",
+                        "gcore.jsdelivr.net"}) {
+                    out.add("https://" + host + "/gh/" + parts[0] + "/" + parts[1]
+                            + "@" + parts[2] + "/" + parts[3]);
+                }
+            }
+        }
+        out.add("https://gh-proxy.com/" + url);
+        out.add("https://ghfast.top/" + url);
+        out.add("https://ghproxy.net/" + url);
+        out.add(url);
+        return out;
+    }
+
     public static void loadImage(Context context, String url, ImageView view) {
+        loadImage(context, url, view, null);
+    }
+
+    public static void loadImage(Context context, String url, ImageView view, View placeholder) {
         if (url == null || url.isEmpty() || view == null) return;
         final Context app = context.getApplicationContext();
-        IO.execute(() -> {
+        IMG.execute(() -> {
             File f = imageCacheFile(app, url);
             byte[] data = readFile(f);
             if (data == null || data.length == 0) {
@@ -171,9 +206,13 @@ public final class Announcement {
             MAIN.post(() -> {
                 if (b != null) {
                     view.setImageBitmap(b);
-                    view.setVisibility(android.view.View.VISIBLE);
+                    view.setVisibility(View.VISIBLE);
+                    if (placeholder != null) placeholder.setVisibility(View.GONE);
                 } else {
-                    view.setVisibility(android.view.View.GONE);
+                    view.setVisibility(View.GONE);
+                    if (placeholder != null) {
+                        ((TextView) placeholder).setText("图片没加载出来，退出重进再试");
+                    }
                 }
             });
         });
@@ -210,29 +249,70 @@ public final class Announcement {
         }
     }
 
+    /** 多线路并发抢第一份：谁先回来用谁，单条线路超时 4s 不会拖死整张图。 */
     private static byte[] fetchImageBytes(String url) {
-        String[] prefixes = {"", "https://gh-proxy.com/", "https://ghproxy.net/"};
-        for (String p : prefixes) {
-            try {
-                HttpURLConnection c = (HttpURLConnection) new URL(p + url).openConnection();
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(10000);
-                c.setRequestProperty("User-Agent", "WaterValve-Android");
-                c.setRequestProperty("Accept", "image/*");
-                if (c.getResponseCode() != 200) {
-                    c.disconnect();
-                    continue;
+        List<String> cands = rawCandidates(url);
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(4, cands.size()));
+        CompletionService<byte[]> cs = new ExecutorCompletionService<>(pool);
+        for (String u : cands) cs.submit(() -> fetchImageOne(u));
+        byte[] best = null;
+        long deadline = System.currentTimeMillis() + 12000;
+        try {
+            for (int i = 0; i < cands.size(); i++) {
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) break;
+                Future<byte[]> f = cs.poll(left, TimeUnit.MILLISECONDS);
+                if (f == null) break;
+                try {
+                    byte[] d = f.get();
+                    if (d != null && d.length > 0) {
+                        best = d;
+                        break;
+                    }
+                } catch (Exception ignored) {
                 }
-                byte[] data;
-                try (InputStream in = c.getInputStream()) {
-                    data = readBytes(in);
-                }
-                c.disconnect();
-                if (data != null && data.length > 0) return data;
-            } catch (Exception ignored) {
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            pool.shutdownNow();
         }
-        return null;
+        return best;
+    }
+
+    private static byte[] fetchImageOne(String url) {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(4000);
+            c.setReadTimeout(8000);
+            c.setRequestProperty("User-Agent", "WaterValve-Android");
+            c.setRequestProperty("Accept", "image/*");
+            if (c.getResponseCode() != 200) return null;
+            byte[] data;
+            try (InputStream in = c.getInputStream()) {
+                data = readBytes(in);
+            }
+            if (data == null || data.length == 0 || data.length > 8 * 1024 * 1024) return null;
+            return data;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    /** 公告一解析出来就在后台把图拉进缓存，等用户看到弹窗时基本已经就位。 */
+    private static void prefetchImages(Context c, Info info) {
+        if (info == null) return;
+        for (String u : info.images) {
+            IMG.execute(() -> {
+                File f = imageCacheFile(c, u);
+                if (f.exists() && f.length() > 0) return;
+                byte[] d = fetchImageBytes(u);
+                if (d != null && d.length > 0) writeFile(f, d);
+            });
+        }
     }
 
     private static Bitmap decodeImage(byte[] data) {
