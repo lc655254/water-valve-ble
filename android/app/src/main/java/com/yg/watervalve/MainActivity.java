@@ -823,6 +823,19 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         for (String raw : notes.replace("\r", "").split("\n")) {
             String t = raw.trim();
             if (t.isEmpty()) continue;
+            // 「## v0.8.3」这种行渲染成版本小标题（跨版本更新时按版本分段）
+            if (t.startsWith("## ")) {
+                TextView head = new TextView(this);
+                head.setText(t.substring(3).trim());
+                head.setTextSize(12);
+                head.setLetterSpacing(0.06f);
+                head.setTextColor(getColor(R.color.primary));
+                head.setTypeface(null, android.graphics.Typeface.BOLD);
+                head.setPadding(0, first ? 0 : dp(16), 0, dp(2));
+                list.addView(head);
+                first = false;
+                continue;
+            }
             boolean sub = raw.startsWith("  ") || raw.startsWith("\t");
             String text = t.replaceFirst("^[•·\\-*+]\\s*", "");
             LinearLayout row = new LinearLayout(this);

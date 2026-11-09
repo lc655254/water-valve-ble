@@ -88,7 +88,7 @@ public final class Updater {
                             x.url = a.optString("browser_download_url", "");
                             x.digest = a.optString("digest", "");
                             x.size = a.optLong("size", 0);
-                            x.notes = androidNotes(release.optString("body", ""));
+                            x.notes = androidNotes(release.optString("body", ""), currentVersion(app));
                             best = x;
                         }
                     }
@@ -256,39 +256,59 @@ public final class Updater {
     }
 
     /**
-     * 从 release body 里挑出「Android」小节的更新说明。
-     * body 里会同时堆着 Windows 小节和历史 Android 小节，所以按小节标题里的版本号取最大的那段，
-     * 而不是取第一段（否则永远显示最老的那次）。
+     * 从 release body 里收集「比当前安装版本新」的所有 Android 小节，按版本倒序拼起来。
+     *
+     * 例：手机上是 0.7.3，最新 0.8.3 → 0.8.3 / 0.8.2 / … / 0.7.6 全部列出来，
+     * 而不是只显示 0.8.3 那几条。每段前面带一行「## v0.8.3」，弹窗里渲染成小节标题。
      */
-    private static String androidNotes(String body) {
+    private static String androidNotes(String body, String current) {
         if (body == null) return "";
         String[] lines = body.replace("\r", "").split("\n");
+        java.util.ArrayList<String> vers = new java.util.ArrayList<>();
+        java.util.ArrayList<StringBuilder> texts = new java.util.ArrayList<>();
         StringBuilder cur = null;
-        StringBuilder best = null;
-        String bestVer = "";
         for (String raw : lines) {
             String t = raw.trim();
             if (t.startsWith("#")) {
                 String bare = t.toLowerCase(Locale.ROOT).replaceAll("^#+\\s*", "");
-                boolean android = bare.startsWith("android");
-                cur = android ? new StringBuilder() : null;
-                if (android) {
-                    String v = firstVersion(t);
-                    if (best == null || cmpVersion(v, bestVer) > 0) {
-                        best = cur;
-                        bestVer = v;
-                    }
+                if (bare.startsWith("android")) {
+                    cur = new StringBuilder();
+                    vers.add(firstVersion(t));
+                    texts.add(cur);
+                } else {
+                    cur = null;
                 }
                 continue;
             }
             if (cur == null || t.isEmpty() || t.startsWith("```")) continue;
-            if (cur.length() > 900) continue;
+            if (cur.length() > 1400) continue;
             // 缩进的二级条目保留层级，别和一级条目挤成一样
             boolean sub = raw.startsWith("  ") || raw.startsWith("\t");
-            cur.append(t.replaceFirst("^[-*+]\\s*", sub ? "     · " : "• ")).append('\n');
+            cur.append(t.replaceFirst("^[•·\\-*+]\\s*", sub ? "     · " : "• ")).append('\n');
         }
-        String s = best == null ? "" : best.toString().trim();
+
+        // 按版本号倒序
+        Integer[] order = new Integer[vers.size()];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        final java.util.List<String> vv = vers;
+        java.util.Arrays.sort(order, (a, b) -> cmpVersion(vv.get(b), vv.get(a)));
+
+        String now = current == null ? "" : current.trim();
+        StringBuilder out = new StringBuilder();
+        for (int i : order) {
+            String v = vers.get(i);
+            String text = texts.get(i).toString().trim();
+            if (text.isEmpty()) continue;
+            // 已经装过的版本不再列（拿不到当前版本时就全列）
+            if (!now.isEmpty() && !v.isEmpty() && cmpVersion(v, now) <= 0) continue;
+            if (out.length() > 0 && out.length() + text.length() > 2600) break;
+            if (!v.isEmpty()) out.append("## v").append(v).append('\n');
+            out.append(text).append('\n');
+        }
+        String s = out.toString().trim();
         if (!s.isEmpty()) return s;
+
+        // 没有可比对的小节（例如说明里没写版本）：退回正文前 360 字
         s = body.trim();
         return s.length() > 360 ? s.substring(0, 360) + "…" : s;
     }
