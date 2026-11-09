@@ -64,6 +64,22 @@ public class SettingsActivity extends Activity {
         });
 
         setupAppearance();
+
+        // 实验开关：零用量时连费率一起清零
+        TextView zeroRate = findViewById(R.id.zeroRateSwitch);
+        if (zeroRate != null) {
+            final String KEY = "zero_rate";
+            boolean on = getSharedPreferences("water_valve", MODE_PRIVATE).getBoolean(KEY, false);
+            zeroRate.setText(on ? "已开启" : "关闭");
+            zeroRate.setTextColor(getColor(on ? R.color.success : R.color.muted));
+            zeroRate.setOnClickListener(v -> {
+                boolean now = !getSharedPreferences("water_valve", MODE_PRIVATE).getBoolean(KEY, false);
+                getSharedPreferences("water_valve", MODE_PRIVATE).edit().putBoolean(KEY, now).apply();
+                zeroRate.setText(now ? "已开启" : "关闭");
+                zeroRate.setTextColor(getColor(now ? R.color.success : R.color.muted));
+                toast(now ? "已开启：零用量时费率也清零" : "已关闭：费率保持原样");
+            });
+        }
     }
 
     // ── 外观 ────────────────────────────────────────────────

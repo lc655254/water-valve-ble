@@ -187,9 +187,20 @@ public final class Protocol {
     }
 
     public static String zeroUsage(String collectFull) {
+        return zeroUsage(collectFull, false);
+    }
+
+    /**
+     * 生成零用量上报流水。
+     *
+     * @param zeroRate true = 连 rate1/rate2 一起清零。62B 新固件实测这样会被服务端
+     *                 判「226 加密校验失败」，但个别设备/云端把扣费金额放在 rate1 里，
+     *                 只清 useCount 仍然照扣 —— 留给用户按设备试。
+     */
+    public static String zeroUsage(String collectFull, boolean zeroRate) {
         Flow f = parseFlow(collectFull);
         if (!f.ok) throw new IllegalArgumentException("流水长度不足 " + FLOW_BASE_LEN + "B");
-        boolean keepRate = f.ext != null && !f.ext.isEmpty();
+        boolean keepRate = !zeroRate && f.ext != null && !f.ext.isEmpty();
         return (f.status + f.time + f.productId + f.deviceId + f.accountId
                 + f.accountType + "0000000000000000"
                 + (keepRate ? f.rate1 + f.rate2 : "0000000000000000")
