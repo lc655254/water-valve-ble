@@ -24,4 +24,9 @@
     <color name="badge_green_bg">#10291F</color>
     <color name="accent_soft">#16203A</color>
     <color name="bound_line">#2E4A7A</color>
+    <!-- 页面背景：深色下更深一档，柔光团压暗 -->
+    <color name="page_top">#0D1219</color>
+    <color name="page_bottom">#080B11</color>
+    <color name="blob_1">#332557F6</color>
+    <color name="blob_2">#1F3B82F6</color>
 </resources>
