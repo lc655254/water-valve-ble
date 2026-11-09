@@ -17,6 +17,7 @@ import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -42,6 +43,7 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -50,6 +52,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -309,6 +312,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             CrashLog.clear(this);
         }
         setupInteractions();
+        setupAppearance();
+        Appearance.apply(this);
         new Handler(Looper.getMainLooper()).postDelayed(this::checkAnnouncement, 2500);
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isFinishing()) checkUpdate(true);
@@ -1297,6 +1302,212 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
     }
 
+    /** 开水按钮底色跟着主题走；关水固定红色 */
+    private void styleWaterButton(boolean stop) {
+        if (btnWater == null) return;
+        if (stop) {
+            btnWater.setBackgroundResource(R.drawable.bg_button_ink);
+            btnWater.setTextColor(getColor(R.color.btn_stop_text));
+        } else {
+            int p = Appearance.primary(this);
+            btnWater.setBackground(Appearance.pill(this, Appearance.lift(p, 0.14f),
+                    Appearance.mix(p, 0xFF000000, 0.14f)));
+            btnWater.setTextColor(Color.WHITE);
+        }
+    }
+
+    // ================= 外观：主题色 / 自定义颜色 / 背景图 =================
+
+    private static final int REQ_PICK_BG = 1001;
+
+    private void setupAppearance() {
+        LinearLayout row = findViewById(R.id.themeSwatches);
+        TextView name = findViewById(R.id.themeName);
+        if (row == null) return;
+        row.removeAllViews();
+        String cur = Appearance.themeId(this);
+        for (final Appearance.Palette pal : Appearance.PRESETS) {
+            View dot = swatch(pal.light, pal.id.equals(cur));
+            dot.setOnClickListener(v -> {
+                tap(v);
+                Appearance.setTheme(this, pal.id);
+                recreate();
+            });
+            row.addView(dot);
+        }
+        int custom = Appearance.customColor(this);
+        View dot = swatch(custom != 0 ? custom : 0xFF94A3B8, "custom".equals(cur));
+        dot.setOnClickListener(v -> {
+            tap(v);
+            showCustomColorDialog();
+        });
+        row.addView(dot);
+
+        if (name != null) {
+            String label = "默认";
+            for (Appearance.Palette pal : Appearance.PRESETS) {
+                if (pal.id.equals(cur)) label = pal.name;
+            }
+            if ("custom".equals(cur) && custom != 0) {
+                label = String.format(Locale.CHINA, "自定义 #%06X", custom & 0xFFFFFF);
+            }
+            name.setText(label);
+        }
+
+        View pick = findViewById(R.id.btnPickBg);
+        if (pick != null) pick.setOnClickListener(v -> {
+            tap(v);
+            pickBackground();
+        });
+        View clear = findViewById(R.id.btnClearBg);
+        if (clear != null) {
+            boolean has = !Appearance.bgImage(this).isEmpty();
+            clear.setVisibility(has ? View.VISIBLE : View.GONE);
+            clear.setOnClickListener(v -> {
+                tap(v);
+                Appearance.clearBgImage(this);
+                recreate();
+            });
+        }
+        View customBtn = findViewById(R.id.btnCustomColor);
+        if (customBtn != null) customBtn.setOnClickListener(v -> {
+            tap(v);
+            showCustomColorDialog();
+        });
+    }
+
+    private View swatch(int color, boolean selected) {
+        View v = new View(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(color);
+        if (selected) g.setStroke(dp(2), getColor(R.color.ink));
+        v.setBackground(g);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        lp.rightMargin = dp(8);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    private void showCustomColorDialog() {
+        LinearLayout box = dialogCard();
+        box.addView(dialogLabel("CUSTOM COLOR"));
+        box.addView(dialogTitle("自定义主色"));
+        TextView note = dialogNote("点一个颜色，或者直接填 #RRGGBB");
+        note.setPadding(0, dp(8), 0, 0);
+        box.addView(note);
+
+        final int[] picked = {Appearance.primary(this)};
+        final EditText hex = new EditText(this);
+        hex.setSingleLine(true);
+        hex.setText(String.format(Locale.CHINA, "#%06X", picked[0] & 0xFFFFFF));
+        hex.setTextSize(15);
+        hex.setTextColor(getColor(R.color.ink));
+        hex.setBackgroundResource(R.drawable.bg_input);
+        hex.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
+        hlp.topMargin = dp(12);
+        box.addView(hex, hlp);
+
+        int[] colors = {
+                0xFF2557F6, 0xFF0EA5E9, 0xFF0E9AA7, 0xFF16A34A, 0xFF84CC16, 0xFFEAB308,
+                0xFFEA580C, 0xFFDC2626, 0xFFE11D48, 0xFFDB2777, 0xFF7C3AED, 0xFF6366F1,
+                0xFF0F172A, 0xFF475569, 0xFF78716C, 0xFF0891B2, 0xFF059669, 0xFFB45309
+        };
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(6);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        glp.topMargin = dp(14);
+        box.addView(grid, glp);
+        for (final int c : colors) {
+            View dot = new View(this);
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setColor(c);
+            dot.setBackground(g);
+            GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
+            lp.width = dp(34);
+            lp.height = dp(34);
+            lp.setMargins(dp(6), dp(6), dp(6), dp(6));
+            grid.addView(dot, lp);
+            dot.setOnClickListener(v -> {
+                tap(v);
+                picked[0] = c;
+                hex.setText(String.format(Locale.CHINA, "#%06X", c & 0xFFFFFF));
+            });
+        }
+
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        Button ok = dialogPrimary("应用");
+        ok.setOnClickListener(v -> {
+            tap(v);
+            int c = parseHex(hex.getText().toString());
+            if (c == 0) {
+                toast("颜色格式不对，用 #RRGGBB");
+                return;
+            }
+            Appearance.setCustomColor(this, c);
+            dialog.dismiss();
+            recreate();
+        });
+        box.addView(ok);
+        TextView cancel = dialogGhost("取消");
+        cancel.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+        });
+        box.addView(cancel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        showStyledDialog(dialog, box, 0.9f);
+    }
+
+    private int parseHex(String s) {
+        if (s == null) return 0;
+        s = s.trim();
+        if (s.startsWith("#")) s = s.substring(1);
+        if (s.length() != 6) return 0;
+        try {
+            return 0xFF000000 | Integer.parseInt(s, 16);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void pickBackground() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("image/*");
+        try {
+            startActivityForResult(i, REQ_PICK_BG);
+        } catch (Exception e) {
+            toast("没有可用的文件选择器");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_PICK_BG || res != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        String ext = "jpg";
+        String type = getContentResolver().getType(uri);
+        if (type != null && type.contains("png")) ext = "png";
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            String path = Appearance.importBgImage(this, in, ext);
+            if (path == null || path.isEmpty()) {
+                toast("这张图读不了，换一张试试");
+                return;
+            }
+            Appearance.setBgImage(this, path);
+            recreate();
+        } catch (Exception e) {
+            toast("选图失败：" + e.getMessage());
+        }
+    }
+
     private void maybeShowScanHint() {
         if (isFinishing() || isDestroyed()) return;
         if (scanHint == null || connected || sawBound) return;
@@ -2218,18 +2429,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             btnWater.setText(waterOp
                     ? (label + "…")
                     : (running ? "关水" : "开水"));
-            btnWater.setBackgroundResource(stop
-                    ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
-            btnWater.setTextColor(stop ? getColor(R.color.btn_stop_text) : Color.WHITE);
+            styleWaterButton(stop);
         } else {
             btnSendCode.setText("发码");
             btnLogin.setText("登录");
             btnScan.setText("扫描水表");
             btnQuery.setText("查询状态");
             btnWater.setText(running ? "关水" : "开水");
-            btnWater.setBackgroundResource(running
-                    ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
-            btnWater.setTextColor(running ? getColor(R.color.btn_stop_text) : Color.WHITE);
+            styleWaterButton(running);
         }
         if (scroll != null) scroll.post(() -> {
             if (scroll.getScrollY() == 0 && sy > 0) scroll.scrollTo(0, sy);   // 只修「被顶回顶部」，不抢用户的滚动
@@ -2241,9 +2448,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         final int sy = scroll == null ? 0 : scroll.getScrollY();
         this.running = running;
         btnWater.setText(running ? "关水" : "开水");
-        btnWater.setBackgroundResource(running
-                ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
-        btnWater.setTextColor(running ? getColor(R.color.btn_stop_text) : Color.WHITE);
+        styleWaterButton(running);
         btnWater.animate().cancel();
         btnWater.setScaleX(1f);
         btnWater.setScaleY(1f);
