@@ -1,6 +1,20 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.11.6）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.11.7）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.11.7 全屏与挖孔适配（2026-11-09）
+
+以前用 `getSystemWindowInsetTop()` 把内容整体下移一个状态栏高度，挖孔机上这个值更大，
+顶部就空出一条。现在窗口直接画进挖孔区，状态栏/导航栏收起：
+
+- `FullScreen.apply()`：`layoutInDisplayCutoutMode = ALWAYS`（API 30+）/ `SHORT_EDGES`（28+），
+  `setDecorFitsSystemWindows(false)`（30+），`hide(statusBars | navigationBars)` +
+  `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`（上沿下滑可临时唤出）；API 26–29 走 IMMERSIVE_STICKY 老旗标
+- insets 只取 `displayCutout()` 和 `systemGestures()`：没有挖孔的机型 top=0，内容顶到屏幕最上沿；
+  挖孔机按挖孔高度让位。`statusBarScrim` 高度也改成挖孔高度，摄像头那一条仍铺页面底色
+- 主界面：标题行 + 挖孔、底栏 + 手势条、登录页内容 + 挖孔与键盘高度；设置页：内容容器 + 挖孔，
+  底部留手势条，返回箭头不再压在摄像头下面
+- 两个 Activity 都在 `onResume` 重新 `hideBars()`，弹过对话框、收过键盘后不会把系统栏留在屏幕上
 
 ## 0.11.6 清除背景后的重启提示（2026-11-09）
 
@@ -172,7 +186,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.11.6（versionCode 56），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.11.7（versionCode 57），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
