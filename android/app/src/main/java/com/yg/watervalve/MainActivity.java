@@ -86,7 +86,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private boolean sawBound;      // 这次扫描里有没有出现「我的水表」
     private TextView scanHint;
     private boolean logExpanded;
-    private ProgressDialog updateProgress;
+    private Dialog downloadDialog;
+    private ProgressBar downloadBar;
+    private TextView downloadPct;
     private Updater.Info pendingUpdate;
     private String lastHeroTitle = "";
 
@@ -661,6 +663,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         version.setText("v" + Updater.currentVersion(this));
         meta.setText("已是最新版本");
         fillNotes(notesList, "当前版本已是最新。");
+        View flow = v.findViewById(R.id.dialogFlow);
+        if (flow != null) flow.setVisibility(View.GONE);
         install.setVisibility(View.GONE);
         later.setText("关闭");
 
@@ -697,15 +701,26 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
         TextView version = v.findViewById(R.id.dialogVersion);
         TextView meta = v.findViewById(R.id.dialogMeta);
+        TextView from = v.findViewById(R.id.dialogFrom);
+        TextView to = v.findViewById(R.id.dialogTo);
+        TextView count = v.findViewById(R.id.dialogCount);
         LinearLayout notesList = v.findViewById(R.id.dialogNotesList);
         ScrollView notesScroll = v.findViewById(R.id.dialogNotesScroll);
         Button install = v.findViewById(R.id.dialogInstall);
         TextView later = v.findViewById(R.id.dialogLater);
 
+        String cur = Updater.currentVersion(this);
         version.setText("v" + info.version);
-        meta.setText(mb(info.size) + " · 当前 v" + Updater.currentVersion(this));
+        meta.setText(mb(info.size) + " · 换个网更快就重试一次");
+        from.setText("当前 v" + cur);
+        to.setText("最新 v" + info.version);
         String notes = info.notes == null ? "" : info.notes.trim();
         fillNotes(notesList, notes.isEmpty() ? "包含界面与稳定性更新。" : notes);
+        int secs = countSections(notes);
+        if (secs > 1) {
+            count.setText("共 " + secs + " 个版本的更新，往下滑看全部");
+            count.setVisibility(View.VISIBLE);
+        }
 
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -740,54 +755,102 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 .start();
     }
 
+    /** 更新说明里有几段「## vX.Y.Z」→ 这次跨了几个版本 */
+    private int countSections(String notes) {
+        if (notes == null || notes.isEmpty()) return 0;
+        int n = 0;
+        for (String line : notes.split("\n")) {
+            if (line.trim().startsWith("## v")) n++;
+        }
+        return n;
+    }
+
     private void downloadUpdate(Updater.Info info) {
         if (isFinishing() || isDestroyed()) return;
         if (manager.isRunning() || manager.hasOpenSession()) {
             toast("放水中，先关水再下载更新");
             return;
         }
-        if (updateProgress != null) updateProgress.dismiss();
-        updateProgress = new ProgressDialog(this);
-        updateProgress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-        updateProgress.setMax(100);
-        updateProgress.setIndeterminate(true);
-        updateProgress.setCancelable(false);
-        updateProgress.setMessage("正在连接下载源…");
-        updateProgress.show();
+        showDownloadDialog(info);
         Updater.download(this, info,
                 (pct, bytes, total) -> runOnUiThread(() -> {
-                    if (updateProgress == null) return;
+                    if (downloadPct == null) return;
                     if (pct < 0) {
-                        if (!updateProgress.isIndeterminate()) {
-                            updateProgress.setIndeterminate(true);
-                        }
-                        updateProgress.setMessage("正在连接下载源…");
+                        downloadPct.setText("正在同时连接几个下载源…");
                     } else {
-                        if (updateProgress.isIndeterminate()) {
-                            updateProgress.setIndeterminate(false);
+                        if (downloadBar != null) {
+                            downloadBar.setProgress(Math.max(0, Math.min(1000, pct * 10)));
                         }
-                        updateProgress.setProgress(pct);
-                        updateProgress.setMessage("下载中… " + pct + "%");
+                        downloadPct.setText(pct + "% · " + mb(bytes) + " / " + mb(total));
                     }
                 }),
                 (file, error) -> runOnUiThread(() -> {
-                    if (updateProgress != null) {
-                        updateProgress.dismiss();
-                        updateProgress = null;
+                    if (downloadDialog != null) {
+                        downloadDialog.dismiss();
+                        downloadDialog = null;
+                        downloadBar = null;
+                        downloadPct = null;
                     }
                     if (isFinishing() || isDestroyed()) return;
                     if (error != null) {
-                        new AlertDialog.Builder(this)
-                                .setTitle("更新下载失败")
-                                .setMessage(error + "\n\n可改用浏览器打开镜像下载。")
-                                .setPositiveButton("浏览器下载",
-                                        (d, w) -> openDownloadInBrowser(info))
-                                .setNegativeButton("知道了", null)
-                                .show();
+                        LinearLayout box = dialogCard();
+                        box.addView(dialogLabel("DOWNLOAD FAILED"));
+                        box.addView(dialogTitle("下载没成功"));
+                        TextView body = dialogBody(error + "\n\n几个镜像都没下下来，可以换到浏览器直接下载。");
+                        body.setPadding(0, dp(14), 0, 0);
+                        box.addView(body);
+                        final Dialog d = new Dialog(this);
+                        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+                        Button browser = dialogPrimary("浏览器下载");
+                        browser.setOnClickListener(x -> {
+                            tap(x);
+                            d.dismiss();
+                            openDownloadInBrowser(info);
+                        });
+                        box.addView(browser);
+                        TextView close = dialogGhost("关闭");
+                        close.setOnClickListener(x -> {
+                            tap(x);
+                            d.dismiss();
+                        });
+                        box.addView(close, new LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+                        showStyledDialog(d, box, 0.9f);
                         return;
                     }
                     installUpdate(file);
                 }));
+    }
+
+    private void showDownloadDialog(Updater.Info info) {
+        LinearLayout box = dialogCard();
+        box.addView(dialogLabel("DOWNLOADING"));
+        box.addView(dialogTitle("正在下载更新"));
+        box.addView(dialogSub("v" + info.version + " · " + mb(info.size)
+                + " · 几个镜像同时下，谁快用谁"));
+
+        ProgressBar bar = new ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(1000);
+        bar.setProgress(0);
+        bar.setProgressTintList(ColorStateList.valueOf(getColor(R.color.primary)));
+        bar.setProgressBackgroundTintList(ColorStateList.valueOf(getColor(R.color.outline)));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(6));
+        blp.topMargin = dp(18);
+        box.addView(bar, blp);
+
+        TextView pct = dialogNote("正在同时连接几个下载源…");
+        pct.setPadding(0, dp(9), 0, 0);
+        box.addView(pct);
+
+        Dialog d = new Dialog(this);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        d.setCanceledOnTouchOutside(false);
+        showStyledDialog(d, box, 0.86f);
+        downloadDialog = d;
+        downloadBar = bar;
+        downloadPct = pct;
     }
 
     private void openDownloadInBrowser(Updater.Info info) {
@@ -2326,9 +2389,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     protected void onDestroy() {
         manager.setListener(null);
-        if (updateProgress != null) {
-            updateProgress.dismiss();
-            updateProgress = null;
+        if (downloadDialog != null) {
+            downloadDialog.dismiss();
+            downloadDialog = null;
+            downloadBar = null;
+            downloadPct = null;
         }
         super.onDestroy();
     }

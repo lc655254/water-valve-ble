@@ -109,39 +109,117 @@ public final class Updater {
         });
     }
 
+    /**
+     * 下载 APK：所有镜像**同时**开抢，谁先下完并通过校验就用谁。
+     * 以前是一个镜像排队等 10 秒连接超时再换下一个，镜像一慢就像卡住了。
+     */
     public static void download(Context context, Info info, ProgressCallback progress,
                                 DoneCallback done) {
         final Context app = context.getApplicationContext();
         IO.execute(() -> {
-            File out = new File(app.getCacheDir(), "WaterValve-" + info.version + ".apk");
+            final File out = new File(app.getCacheDir(), "WaterValve-" + info.version + ".apk");
             if (out.exists() && !out.delete()) {
                 MAIN.post(() -> done.done(null, "无法清理旧缓存"));
                 return;
             }
-            String[] mirrors = {
+            String[] all = {
                     "https://gh-proxy.com/" + info.url,
-                    "https://ghproxy.net/" + info.url,
                     "https://ghfast.top/" + info.url,
+                    "https://ghproxy.net/" + info.url,
                     info.url
             };
-            String last = "下载失败";
+            java.util.List<String> list = new java.util.ArrayList<>();
+            for (String u : all) {
+                if (u != null && !u.trim().isEmpty()) list.add(u);
+            }
+            if (list.isEmpty()) {
+                MAIN.post(() -> done.done(null, "没有可用的下载地址"));
+                return;
+            }
             if (progress != null) MAIN.post(() -> progress.progress(-1, 0, info.size));
-            for (String url : mirrors) {
-                if (url == null || url.isEmpty()) continue;
-                try {
-                    downloadOne(url, out, info, progress);
-                    verify(out, info);
-                    File result = out;
-                    MAIN.post(() -> done.done(result, null));
-                    return;
-                } catch (Exception e) {
-                    last = e.getClass().getSimpleName()
-                            + (e.getMessage() == null ? "" : " " + e.getMessage());
-                    out.delete();
-                    if (progress != null) {
-                        MAIN.post(() -> progress.progress(-1, 0, info.size));
+
+            final java.util.concurrent.atomic.AtomicLong best =
+                    new java.util.concurrent.atomic.AtomicLong(0);
+            final java.util.concurrent.ExecutorService pool =
+                    java.util.concurrent.Executors.newFixedThreadPool(list.size());
+            final java.util.concurrent.CompletionService<File> cs =
+                    new java.util.concurrent.ExecutorCompletionService<>(pool);
+            final java.util.List<java.util.concurrent.Future<File>> futures =
+                    new java.util.ArrayList<>();
+
+            for (int i = 0; i < list.size(); i++) {
+                final String url = list.get(i);
+                final File tmp = new File(app.getCacheDir(),
+                        "WaterValve-" + info.version + "-" + i + ".part");
+                futures.add(cs.submit(() -> {
+                    try {
+                        if (tmp.exists() && !tmp.delete()) {
+                            throw new IOException("无法清理临时文件");
+                        }
+                        downloadOne(url, tmp, info, (pct, read, total) ->
+                                best.accumulateAndGet(read, Math::max));
+                        verify(tmp, info);
+                        return tmp;
+                    } catch (Exception e) {
+                        tmp.delete();
+                        throw e;
+                    }
+                }));
+            }
+
+            // 进度取「读得最多的那条线」，看起来就是最快镜像的进度
+            final long total = info.size;
+            final boolean[] running = {true};
+            Thread reporter = new Thread(() -> {
+                while (running[0]) {
+                    long r = best.get();
+                    if (progress != null && total > 0 && r > 0) {
+                        int pct = (int) Math.min(100, r * 100 / total);
+                        final long fr = r;
+                        MAIN.post(() -> progress.progress(pct, fr, total));
+                    }
+                    try {
+                        Thread.sleep(120);
+                    } catch (InterruptedException e) {
+                        return;
                     }
                 }
+            });
+            reporter.setDaemon(true);
+            reporter.start();
+
+            String last = "下载失败";
+            int remaining = list.size();
+            File ok = null;
+            while (remaining > 0) {
+                java.util.concurrent.Future<File> f;
+                try {
+                    f = cs.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                if (f == null) continue;
+                remaining--;
+                try {
+                    ok = f.get();
+                    break;
+                } catch (Exception e) {
+                    Throwable c = e.getCause() == null ? e : e.getCause();
+                    last = c.getClass().getSimpleName()
+                            + (c.getMessage() == null ? "" : " " + c.getMessage());
+                }
+            }
+
+            running[0] = false;
+            reporter.interrupt();
+            for (java.util.concurrent.Future<File> f : futures) f.cancel(true);
+            pool.shutdownNow();
+
+            if (ok != null && ok.exists() && ok.renameTo(out)) {
+                final File result = out;
+                if (progress != null) MAIN.post(() -> progress.progress(100, total, total));
+                MAIN.post(() -> done.done(result, null));
+                return;
             }
             final String fe = last;
             MAIN.post(() -> done.done(null, fe));
