@@ -1,6 +1,18 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.11.9）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.0）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.0 换主题/背景图实时生效（2026-11-09）
+
+以前 `Appearance.apply()` 只在 `onCreate` 跑一次，设置里改完必须重启才看得到。现在：
+
+- 两个 Activity 都在 `onResume` 重新 `apply()`：从设置页返回主界面立刻换色、换背景图
+- 面（surface）也改成运行期生成：`cardBg` 白底掺 2.5% 主色、`bottomBarBg`、`inputBg`、
+  `ghostBg`、`logBg`、`noticeBg`、`chipBg(色)`；卡片边框、输入框描边都跟着主色走
+- `retint()` 递归遍历视图树，把布局里写死的 `@color/primary` / `success` / `danger`
+  文字色换成当前配色；语义色用 `harmonize()` 只往主色偏 10~12%，保留红绿的可读性
+- 背景图解码结果按「路径 + 修改时间」缓存，回到前台不再重新解 1600px 大图
+- 清除背景不再要求重启：返回主界面即恢复默认底色，提示语同步改了
 
 ## 0.11.9 计费自检：要不要开实验（2026-11-09）
 
@@ -213,7 +225,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.11.9（versionCode 59），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.0（versionCode 60），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

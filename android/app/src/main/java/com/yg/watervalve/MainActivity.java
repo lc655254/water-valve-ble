@@ -2510,6 +2510,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     protected void onResume() {
         super.onResume();
         FullScreen.hideBars(this);
+        // 从设置页回来时立刻换上新主题 / 新背景图，不用重启
+        Appearance.apply(this);
+        styleWaterButton(running);
+        renderWaterStatus();
         DebugLog.op("界面可见（onResume）");
     }
 
