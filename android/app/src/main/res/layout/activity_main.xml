@@ -159,6 +159,12 @@
                         android:visibility="gone" />
                 </LinearLayout>
 
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="12dp"
+                    android:background="@color/line" />
+
                 <TextView
                     android:id="@+id/sessionStatus"
                     android:layout_width="match_parent"
@@ -324,6 +330,12 @@
                         android:textSize="11sp" />
                 </LinearLayout>
 
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="12dp"
+                    android:background="@color/line" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -420,6 +432,12 @@
                         android:textSize="10sp" />
                 </LinearLayout>
 
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="12dp"
+                    android:background="@color/line" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -446,6 +464,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
                             android:fontFamily="sans-serif-medium"
+                            android:fontFeatureSettings="tnum"
                             android:text="—"
                             android:textColor="@color/ink"
                             android:textSize="24sp" />
@@ -486,6 +505,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
                             android:fontFamily="sans-serif-medium"
+                            android:fontFeatureSettings="tnum"
                             android:text="—"
                             android:textColor="@color/ink"
                             android:textSize="24sp" />
@@ -552,6 +572,12 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@color/line" />
 
                     <TextView
                         android:id="@+id/btnCopyLog"
