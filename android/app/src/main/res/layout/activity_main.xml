@@ -38,8 +38,8 @@
                     android:background="@drawable/bg_brand_mark">
 
                     <ImageView
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
                         android:layout_gravity="center"
                         android:contentDescription="水滴"
                         android:src="@drawable/ic_drop" />
@@ -714,8 +714,8 @@
                 android:background="@drawable/bg_brand_mark">
 
                 <ImageView
-                    android:layout_width="28dp"
-                    android:layout_height="28dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:layout_gravity="center"
                     android:contentDescription="水滴"
                     android:src="@drawable/ic_drop" />
