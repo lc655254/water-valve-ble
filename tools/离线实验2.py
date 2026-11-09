@@ -3,6 +3,10 @@
 
 依次试两个历史 downData；只要有一个被接受就会出水，脚本 3 秒后自动关阀清账。
 """
+
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import asyncio
 import sys
 

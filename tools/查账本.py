@@ -6,6 +6,10 @@
     python 查账本.py "D:\\WaterValveBLE\\settle_log.json"
     python 查账本.py --all          # 连零用量的一起列
 """
+
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import datetime
 import json
 import os

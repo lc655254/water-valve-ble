@@ -3,6 +3,10 @@
 
 不碰蓝牙、不登录、不联网。跑法： python _bench_启动.py
 """
+
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import os
 import socket
 import sys

@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
 """ASCII entry for the startup benchmark."""
+
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import os
 import runpy
 import sys
