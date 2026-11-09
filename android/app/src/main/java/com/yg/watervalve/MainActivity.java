@@ -2271,6 +2271,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void appendLog(String line) {
+        DebugLog.line("ui", line);
         runOnUiThread(() -> {
             String t = timeFmt.format(new Date());
             logBuf.append(t).append("  ").append(line).append('\n');

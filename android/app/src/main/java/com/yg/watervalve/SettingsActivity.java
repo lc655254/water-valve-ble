@@ -24,6 +24,10 @@ import java.util.Locale;
 public class SettingsActivity extends Activity {
 
     private static final int REQ_PICK_BG = 2001;
+    private static final int REQ_SAVE_LOG = 2002;
+
+    /** 导出时先把合并好的文本放这里，用户选完保存位置再写盘。 */
+    private String pendingLog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +68,7 @@ public class SettingsActivity extends Activity {
         });
 
         setupAppearance();
+        setupDebug();
 
         // 实验开关：零用量时连费率一起清零
         TextView zeroRate = findViewById(R.id.zeroRateSwitch);
@@ -75,6 +80,7 @@ public class SettingsActivity extends Activity {
             zeroRate.setOnClickListener(v -> {
                 boolean now = !getSharedPreferences("water_valve", MODE_PRIVATE).getBoolean(KEY, false);
                 getSharedPreferences("water_valve", MODE_PRIVATE).edit().putBoolean(KEY, now).apply();
+                DebugLog.line("prefs", "零用量连费率清零 = " + now);
                 zeroRate.setText(now ? "已开启" : "关闭");
                 zeroRate.setTextColor(getColor(now ? R.color.success : R.color.muted));
                 toast(now ? "已开启：零用量时费率也清零" : "已关闭：费率保持原样");
@@ -93,6 +99,7 @@ public class SettingsActivity extends Activity {
                 View dot = swatch(pal.light, pal.id.equals(cur));
                 dot.setOnClickListener(v -> {
                     Appearance.setTheme(this, pal.id);
+                    DebugLog.line("prefs", "主题 = " + pal.id);
                     recreate();
                 });
                 row.addView(dot);
@@ -127,6 +134,151 @@ public class SettingsActivity extends Activity {
         }
         View customBtn = findViewById(R.id.btnCustomColor);
         if (customBtn != null) customBtn.setOnClickListener(v -> showCustomColorDialog());
+    }
+
+    // ── 调试日志 ────────────────────────────────────────────
+    private void setupDebug() {
+        final TextView sw = findViewById(R.id.debugSwitch);
+        final TextView state = findViewById(R.id.debugState);
+        final TextView status = findViewById(R.id.debugStatus);
+        paintDebug(sw, state, DebugLog.isOn());
+        if (status != null) status.setText(DebugLog.stats());
+
+        if (sw != null) sw.setOnClickListener(v -> {
+            boolean now = !DebugLog.isOn();
+            DebugLog.setOn(this, now);
+            paintDebug(sw, state, now);
+            if (status != null) status.setText(DebugLog.stats());
+            toast(now ? "已开启：重现一次扣款问题，再回来导出日志"
+                    : "已关闭：已经记下的日志仍然保留");
+        });
+
+        View export = findViewById(R.id.btnExportLog);
+        if (export != null) export.setOnClickListener(v -> exportLog());
+
+        View copy = findViewById(R.id.btnCopyLog);
+        if (copy != null) copy.setOnClickListener(v -> {
+            String text = DebugLog.recentText();
+            if (text == null || text.trim().isEmpty()) {
+                toast("还没有日志，先打开调试记录一次");
+                return;
+            }
+            android.content.ClipboardManager cm =
+                    (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null) {
+                toast("这台手机不支持复制");
+                return;
+            }
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("debug", text));
+            int n = text.split("\n").length;
+            toast("已复制最近 " + n + " 行");
+        });
+
+        View clear = findViewById(R.id.btnClearLog);
+        if (clear != null) clear.setOnClickListener(v -> confirm("清空调试日志？",
+                "会把手机里保存的所有日志文件删掉，无法恢复。", "清空", () -> {
+                    DebugLog.clear(this);
+                    if (status != null) status.setText(DebugLog.stats());
+                    toast("已清空");
+                }));
+    }
+
+    private void paintDebug(TextView sw, TextView state, boolean on) {
+        int color = getColor(on ? R.color.success : R.color.muted);
+        if (sw != null) {
+            sw.setText(on ? "已开启" : "关闭");
+            sw.setTextColor(color);
+        }
+        if (state != null) {
+            state.setText(on ? "记录中" : "未开启");
+            state.setTextColor(color);
+        }
+    }
+
+    private void exportLog() {
+        toast("正在整理日志…");
+        new Thread(() -> {
+            final String text = DebugLog.bundle(this);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                pendingLog = text;
+                String name = "watervalve-debug-"
+                        + new java.text.SimpleDateFormat("yyyyMMdd-HHmm", Locale.CHINA)
+                        .format(new java.util.Date()) + ".txt";
+                Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_TITLE, name);
+                try {
+                    startActivityForResult(i, REQ_SAVE_LOG);
+                } catch (Exception e) {
+                    pendingLog = null;
+                    toast("这台手机没有文件保存界面，改用「复制最近」");
+                }
+            });
+        }).start();
+    }
+
+    /** 简单确认框，跟设置页其它弹窗同一套外观。 */
+    private void confirm(String titleText, String msg, String okText, final Runnable onOk) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(12));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+
+        TextView title = new TextView(this);
+        title.setText(titleText);
+        title.setTextSize(17);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(getColor(R.color.ink));
+        box.addView(title);
+
+        TextView note = new TextView(this);
+        note.setText(msg);
+        note.setTextSize(12);
+        note.setLineSpacing(dp(2), 1f);
+        note.setTextColor(getColor(R.color.muted));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(10);
+        box.addView(note, nlp);
+
+        TextView ok = new TextView(this);
+        ok.setText(okText);
+        ok.setTextSize(14);
+        ok.setGravity(android.view.Gravity.CENTER);
+        ok.setTextColor(getColor(R.color.primary));
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        olp.topMargin = dp(14);
+        box.addView(ok, olp);
+        ok.setOnClickListener(v -> {
+            dialog.dismiss();
+            onOk.run();
+        });
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(13);
+        cancel.setTextColor(getColor(R.color.muted));
+        cancel.setGravity(android.view.Gravity.CENTER);
+        box.addView(cancel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        cancel.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setContentView(box);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.show();
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            w.setDimAmount(0.35f);
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.88f),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private View swatch(int color, boolean selected) {
@@ -305,6 +457,20 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_SAVE_LOG) {
+            if (res == RESULT_OK && data != null && data.getData() != null && pendingLog != null) {
+                try (java.io.OutputStream os = getContentResolver().openOutputStream(data.getData())) {
+                    if (os == null) throw new IllegalStateException("打不开目标文件");
+                    os.write(pendingLog.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    os.flush();
+                    toast("日志已保存：" + pendingLog.length() + " 字符");
+                } catch (Exception e) {
+                    toast("保存失败：" + e.getMessage());
+                }
+            }
+            pendingLog = null;
+            return;
+        }
         if (req != REQ_PICK_BG || res != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         String ext = "jpg";

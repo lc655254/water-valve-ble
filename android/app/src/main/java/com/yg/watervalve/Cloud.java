@@ -258,36 +258,50 @@ public final class Cloud {
     }
 
     private static JSONObject request(String method, String url, String body) throws Exception {
+        long t0 = System.currentTimeMillis();
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(20000);
-        c.setReadTimeout(20000);
-        c.setRequestMethod(method);
-        c.setRequestProperty("User-Agent", UA);
-        c.setRequestProperty("Accept", "application/json");
-        if ("POST".equals(method)) {
-            byte[] b = (body == null ? "" : body).getBytes(StandardCharsets.UTF_8);
-            c.setDoOutput(true);
-            c.setRequestProperty("Content-Type",
-                    "application/x-www-form-urlencoded; charset=UTF-8");
-            c.setFixedLengthStreamingMode(b.length);
-            try (OutputStream os = c.getOutputStream()) {
-                os.write(b);
+        int code = -1;
+        try {
+            c.setConnectTimeout(20000);
+            c.setReadTimeout(20000);
+            c.setRequestMethod(method);
+            c.setRequestProperty("User-Agent", UA);
+            c.setRequestProperty("Accept", "application/json");
+            if ("POST".equals(method)) {
+                byte[] b = (body == null ? "" : body).getBytes(StandardCharsets.UTF_8);
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type",
+                        "application/x-www-form-urlencoded; charset=UTF-8");
+                c.setFixedLengthStreamingMode(b.length);
+                try (OutputStream os = c.getOutputStream()) {
+                    os.write(b);
+                }
             }
-        }
-        int code = c.getResponseCode();
-        InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
-        StringBuilder sb = new StringBuilder();
-        if (is != null) {
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                char[] buf = new char[2048];
-                int n;
-                while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+            code = c.getResponseCode();
+            InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            StringBuilder sb = new StringBuilder();
+            if (is != null) {
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    char[] buf = new char[2048];
+                    int n;
+                    while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+                }
             }
+            String note = "net=" + DebugLog.netType()
+                    + (c.getHeaderField("Content-Type") == null ? ""
+                    : " ct=" + c.getHeaderField("Content-Type"));
+            DebugLog.http(method, url, body, code, sb.toString(),
+                    System.currentTimeMillis() - t0, note, null);
+            if (sb.length() == 0) throw new ApiException(code, "云端返回空响应 HTTP " + code);
+            return new JSONObject(sb.toString());
+        } catch (Exception e) {
+            DebugLog.http(method, url, body, code, null,
+                    System.currentTimeMillis() - t0, "net=" + DebugLog.netType(), e);
+            throw e;
+        } finally {
+            c.disconnect();
         }
-        c.disconnect();
-        if (sb.length() == 0) throw new ApiException(code, "云端返回空响应 HTTP " + code);
-        return new JSONObject(sb.toString());
     }
 
     public static final class ApiException extends Exception {

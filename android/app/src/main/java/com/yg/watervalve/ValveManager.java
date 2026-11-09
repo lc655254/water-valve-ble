@@ -1496,6 +1496,8 @@ public final class ValveManager {
     };
 
     private void log(String msg) {
+        // 界面活着时由 MainActivity 落盘；界面没了（后台服务）这里兜底，日志不断档
+        if (listener == null) DebugLog.line("vm", msg);
         main.post(() -> {
             if (listener != null) listener.onLog(msg);
         });

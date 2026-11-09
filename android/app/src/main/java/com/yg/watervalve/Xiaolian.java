@@ -170,6 +170,11 @@ public final class Xiaolian {
         out.status = c.getResponseCode();
         InputStream is = out.status >= 400 ? c.getErrorStream() : c.getInputStream();
         String text = read(is);
+        DebugLog.line("http", "POST " + url + " | HTTP " + out.status + " | 小联/宿舍名");
+        if (text != null && !text.isEmpty()) {
+            DebugLog.line("http", "  ← " + (text.length() > 4000
+                    ? text.substring(0, 4000) + "…(共 " + text.length() + " 字符)" : text));
+        }
         out.access = header(c, "accessToken");
         out.refresh = header(c, "refreshToken");
         try {

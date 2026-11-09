@@ -144,10 +144,12 @@ public final class Announcement {
                 c.setRequestProperty("Accept", "application/json");
                 int code = c.getResponseCode();
                 if (code != 200) {
+                    DebugLog.line("http", "GET " + u + " | HTTP " + code + " | 公告镜像");
                     c.disconnect();
                     continue;
                 }
                 String s = readAll(c.getInputStream());
+                DebugLog.line("http", "GET " + u + " | HTTP 200 | 公告 " + (s == null ? 0 : s.length()) + " 字符");
                 c.disconnect();
                 if (s != null && !s.trim().isEmpty()) return s;
             } catch (Exception ignored) {
@@ -288,11 +290,17 @@ public final class Announcement {
             c.setReadTimeout(8000);
             c.setRequestProperty("User-Agent", "WaterValve-Android");
             c.setRequestProperty("Accept", "image/*");
-            if (c.getResponseCode() != 200) return null;
+            int code = c.getResponseCode();
+            if (code != 200) {
+                DebugLog.line("http", "GET " + url + " | HTTP " + code + " | 公告图");
+                return null;
+            }
             byte[] data;
             try (InputStream in = c.getInputStream()) {
                 data = readBytes(in);
             }
+            DebugLog.line("http", "GET " + url + " | HTTP 200 | 公告图 "
+                    + (data == null ? 0 : data.length) + "B");
             if (data == null || data.length == 0 || data.length > 8 * 1024 * 1024) return null;
             return data;
         } catch (Exception e) {
