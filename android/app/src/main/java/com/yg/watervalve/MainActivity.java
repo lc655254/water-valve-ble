@@ -90,6 +90,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private boolean sawBound;      // 这次扫描里有没有出现「我的水表」
     private TextView scanHint;
     private boolean logExpanded;
+    private boolean logFlushScheduled;
+    /** 日志框是不是贴着底部：用户往上翻看时不再自动跟到底 */
+    private boolean logStickBottom = true;
     private Dialog downloadDialog;
     private ProgressBar downloadBar;
     private TextView downloadPct;
@@ -292,6 +295,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             animateVisibility(logBody, show);
             btnToggleLog.setText(show ? "收起" : "展开");
             if (show) {
+                logStickBottom = true;
+                logView.setText(logBuf);
                 logBody.postDelayed(() -> logScroll.fullScroll(View.FOCUS_DOWN), 260);
             }
         });
@@ -2283,15 +2288,39 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         appendLog(line);
     }
 
-    private void appendLog(String line) {
+    private void appendLog(final String line) {
         DebugLog.line("ui", line);
         runOnUiThread(() -> {
             String t = timeFmt.format(new Date());
             logBuf.append(t).append("  ").append(line).append('\n');
             if (logBuf.length() > 30000) logBuf.delete(0, logBuf.length() - 20000);
-            logView.setText(logBuf);
-            logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+            // 日志卡片收着的时候完全不碰界面，结算刷屏也不会打断用户正在看的内容
+            if (logExpanded) scheduleLogFlush();
         });
+    }
+
+    /** 结算时一秒几十行，攒 250ms 刷一次，避免每条都重排整页 */
+    private void scheduleLogFlush() {
+        if (logFlushScheduled) return;
+        logFlushScheduled = true;
+        uiHandler.postDelayed(this::flushLog, 250);
+    }
+
+    private void flushLog() {
+        logFlushScheduled = false;
+        if (!logExpanded) return;
+        final int outerY = scroll == null ? 0 : scroll.getScrollY();
+        logView.setText(logBuf);
+        // 只有用户本来就贴在底部时才自动跟到底，往上翻着看就别抢
+        if (logStickBottom) {
+            logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+        }
+        // 日志重排有时会把外层的整页带着滚一下：按原位置放回去
+        if (scroll != null) {
+            scroll.post(() -> {
+                if (scroll.getScrollY() != outerY) scroll.scrollTo(0, outerY);
+            });
+        }
     }
 
     @Override
@@ -2558,6 +2587,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         View[] press = {btnWater, btnScan, btnQuery, btnLogin, btnSendCode,
                 btnCopyLog, btnToggleLogin, btnToggleLog, btnCheckUpdate};
         for (View v : press) pressScale(v);
+        // 日志框：用户自己往上翻的时候，别被新日志拽回底部
+        logScroll.setOnScrollChangeListener((v, sx, sy, oldX, oldY) -> {
+            View child = logScroll.getChildAt(0);
+            if (child == null) return;
+            logStickBottom = sy + logScroll.getHeight() >= child.getHeight() - dp(16);
+        });
         scroll.setOnScrollChangeListener((v, sx, sy, oldX, oldY) -> {
             float t = Math.min(1f, sy / (float) dp(140));
             bottomBar.setElevation(dp(4) + t * dp(10));
