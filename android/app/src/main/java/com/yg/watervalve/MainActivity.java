@@ -35,6 +35,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -78,6 +79,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.CHINA);
     private boolean running;
     private boolean connected;
+    private boolean sawBound;      // 这次扫描里有没有出现「我的水表」
+    private TextView scanHint;
     private boolean logExpanded;
     private ProgressDialog updateProgress;
     private Updater.Info pendingUpdate;
@@ -132,6 +135,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnXiaolian = findViewById(R.id.btnXiaolian);
         btnNotice = findViewById(R.id.btnNotice);
         deviceList = findViewById(R.id.deviceList);
+        scanHint = findViewById(R.id.scanHint);
         statHistory = findViewById(R.id.statHistory);
         accountActions = findViewById(R.id.accountActions);
         header = findViewById(R.id.header);
@@ -213,11 +217,21 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnScan.setOnClickListener(v -> {
             tap(v);
             btnScan.setText("扫描中…");
+            sawBound = false;
+            hideScanHint();
             manager.scan();
+            // 2 秒还没看到自己的水表 → 露出「找不到自己的水表？」入口
+            uiHandler.postDelayed(this::maybeShowScanHint, 2000);
             btnScan.postDelayed(() -> {
                 if (!manager.isBusy()) btnScan.setText("扫描水表");
             }, 16000);
         });
+        if (scanHint != null) {
+            scanHint.setOnClickListener(v -> {
+                tap(v);
+                showDiagWizard("a1");
+            });
+        }
         btnQuery.setOnClickListener(v -> {
             tap(v);
             manager.query();
@@ -1071,6 +1085,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         if (item == null) return;
         final String name = item.name == null || item.name.isEmpty() ? "水表" : item.name;
         connectingItem = item;
+        hideScanHint();
         if (connectDialog != null && connectDialog.isShowing()) connectDialog.dismiss();
         if (failDialog != null && failDialog.isShowing()) {
             failDialog.dismiss();
@@ -1084,7 +1099,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
         final ProgressBar bar = new ProgressBar(this, null,
                 android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(5);
+        bar.setMax(1000);
         bar.setProgress(0);
         bar.setProgressTintList(ColorStateList.valueOf(getColor(R.color.primary)));
         bar.setProgressBackgroundTintList(ColorStateList.valueOf(getColor(R.color.outline)));
@@ -1118,17 +1133,35 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         connectDialog = dialog;
         manager.connect(item);
 
+        // 进度条按 5 秒线性推满：一帧一帧走，不再一秒跳一格
+        final ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+        anim.setDuration(CONNECT_WAIT_MS);
+        anim.setInterpolator(new LinearInterpolator());
+        final int[] shownSec = {-1};
+        anim.addUpdateListener(a -> {
+            float f = (float) a.getAnimatedValue();
+            bar.setProgress((int) (f * 1000));
+            int s = Math.min(5, (int) Math.floor(f * 5));
+            if (s != shownSec[0]) {
+                shownSec[0] = s;
+                elapse.setText(s < 3 ? "已等 " + s + " 秒 · 最多 5 秒"
+                        : "已等 " + s + " 秒 · 有人在占着连接…");
+            }
+        });
+        anim.start();
+        dialog.setOnDismissListener(d -> anim.cancel());
+
         final long t0 = System.currentTimeMillis();
         uiHandler.post(new Runnable() {
             @Override
             public void run() {
                 if (connectDialog != dialog) return;
-                if (!dialog.isShowing()) return;
-                int sec = (int) ((System.currentTimeMillis() - t0) / 1000);
-                bar.setProgress(Math.min(sec, 5));
-                elapse.setText(sec < 3 ? "已等 " + sec + " 秒 · 最多 5 秒"
-                        : "已等 " + sec + " 秒 · 有人在占着连接…");
+                if (!dialog.isShowing()) {
+                    anim.cancel();
+                    return;
+                }
                 if (manager.isConnected()) {
+                    anim.cancel();
                     dialog.dismiss();
                     connectDialog = null;
                     connected = true;
@@ -1137,18 +1170,34 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                     manager.query();
                     return;
                 }
-                if (sec >= 5) {
+                if (System.currentTimeMillis() - t0 >= CONNECT_WAIT_MS) {
+                    anim.cancel();
                     dialog.dismiss();
                     connectDialog = null;
                     showConnectFailed(item);
                     return;
                 }
-                uiHandler.postDelayed(this, 250);
+                uiHandler.postDelayed(this, 150);
             }
         });
     }
 
-    /** 连接失败：一句话原因 + 两步动作，按钮「重试 / 按提示排查 / 知道了」 */
+    private void maybeShowScanHint() {
+        if (isFinishing() || isDestroyed()) return;
+        if (scanHint == null || connected || sawBound) return;
+        if (scanHint.getVisibility() == View.VISIBLE) return;
+        scanHint.setVisibility(View.VISIBLE);
+        scanHint.setAlpha(0f);
+        scanHint.setTranslationY(dp(6));
+        scanHint.animate().alpha(1f).translationY(0f).setDuration(200)
+                .setInterpolator(new DecelerateInterpolator()).start();
+    }
+
+    private void hideScanHint() {
+        if (scanHint == null) return;
+        scanHint.setVisibility(View.GONE);
+    }
+
     private void showConnectFailed(ValveManager.ScanItem item) {
         if (isFinishing() || isDestroyed()) return;
         final String name = item == null || item.name == null || item.name.isEmpty()
@@ -1508,6 +1557,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private static final int PROBE_ATTEMPTS = 3;
     private static final long PROBE_WINDOW_MS = 3000;
+    /** 连接等待上限：宿舍里正常 1 秒内连上，5 秒还没连上就是被占用 */
+    private static final long CONNECT_WAIT_MS = 5000;
 
     private void probeOccupancy(final ValveManager.ScanItem item) {
         if (item == null) {
@@ -2067,6 +2118,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         if (connected) return;          // 已经连上了就不再显示列表
         for (int i = 0; i < devices.size(); i++) {
             ValveManager.ScanItem item = devices.get(i);
+            if (item.bound) {
+                sawBound = true;
+                hideScanHint();
+            }
             TextView tv = new TextView(this);
             String name = item.name == null || item.name.isEmpty()
                     ? "KLCXKJ 水表" : item.name;
@@ -2159,6 +2214,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             // 连上以后列表就没用了：清掉，别再占着屏幕
             if (deviceList != null) deviceList.removeAllViews();
             btnScan.setText("重新扫描");
+            hideScanHint();
             // 5 秒判失败后又连上了：把失败弹窗收掉，别让人以为还连不上
             if (failDialog != null && failDialog.isShowing()) {
                 failDialog.dismiss();
