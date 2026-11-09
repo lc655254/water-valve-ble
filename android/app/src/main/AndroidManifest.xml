@@ -52,6 +52,13 @@
             android:name=".InstallReceiver"
             android:exported="false" />
 
+        <!-- 日志分享：把 files/share 下的文件暴露成 content:// 给微信/QQ -->
+        <provider
+            android:name=".LogProvider"
+            android:authorities="com.yg.watervalve.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <receiver
             android:name=".ValveRecoverReceiver"
             android:exported="true">

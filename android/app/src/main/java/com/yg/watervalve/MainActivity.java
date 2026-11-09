@@ -282,6 +282,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 toast("日志已复制");
             }
         });
+        View btnShareLog = findViewById(R.id.btnShareLog);
+        if (btnShareLog != null) {
+            btnShareLog.setOnClickListener(v -> {
+                tap(v);
+                LogShare.share(this);
+            });
+        }
         btnToggleLogin.setOnClickListener(v -> {
             tap(v);
             // 统一走独立登录页：切账号也是重新登录
@@ -321,6 +328,16 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         if (!crash.isEmpty()) {
             appendLog("上次崩溃日志：\n" + crash.substring(0, Math.min(1500, crash.length())));
             CrashLog.clear(this);
+        }
+        // 崩溃时已经自动打包好的日志：这次打开就问一句要不要直接发出去
+        String pendingShare = getSharedPreferences("water_valve", MODE_PRIVATE)
+                .getString("pending_share", "");
+        if (pendingShare != null && !pendingShare.isEmpty()) {
+            getSharedPreferences("water_valve", MODE_PRIVATE)
+                    .edit().remove("pending_share").apply();
+            final String shareName = pendingShare;
+            new Handler(Looper.getMainLooper())
+                    .postDelayed(() -> offerCrashShare(shareName), 900);
         }
         setupInteractions();
         Appearance.apply(this);
@@ -2003,6 +2020,53 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         v.setPadding(dp(10), dp(5), dp(10), dp(5));
         v.setSingleLine(true);
         return v;
+    }
+
+    /** 上次崩溃时自动打包的日志：问一句要不要直接分享出去 */
+    private void offerCrashShare(final String name) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(12));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+
+        TextView title = new TextView(this);
+        title.setText("上次异常退出");
+        title.setTextSize(17);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(getColor(R.color.ink));
+        box.addView(title);
+
+        TextView note = new TextView(this);
+        note.setText("日志已经自动打包好了（含崩溃堆栈和最后的操作），可以直接分享给开发者定位问题。");
+        note.setTextSize(12);
+        note.setLineSpacing(dp(2), 1f);
+        note.setTextColor(getColor(R.color.muted));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(10);
+        box.addView(note, nlp);
+
+        Button share = dialogPrimary("分享日志");
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
+        slp.topMargin = dp(16);
+        box.addView(share, slp);
+        share.setOnClickListener(v -> {
+            dialog.dismiss();
+            LogShare.shareFile(this, name);
+        });
+
+        TextView later = dialogGhost("以后再说");
+        later.setGravity(android.view.Gravity.CENTER);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+        llp.topMargin = dp(6);
+        box.addView(later, llp);
+        later.setOnClickListener(v -> dialog.dismiss());
+
+        showStyledDialog(dialog, box, 0.88f);
     }
 
     private Button dialogPrimary(String text) {

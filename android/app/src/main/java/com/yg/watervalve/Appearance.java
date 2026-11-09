@@ -306,8 +306,8 @@ public final class Appearance {
             View v = a.findViewById(id);
             if (v != null) v.setBackground(inputBg(a));
         }
-        int[] ghosts = {R.id.btnQuery, R.id.btnCopyLog, R.id.btnToggleLogin,
-                R.id.btnToggleLog, R.id.scanHint};
+        // 幽灵按钮：只给真正需要的（复制/收起这种纯文字按钮不加底，太挤）
+        int[] ghosts = {R.id.btnQuery, R.id.btnToggleLogin, R.id.scanHint};
         for (int id : ghosts) {
             View v = a.findViewById(id);
             if (v != null) v.setBackground(ghostBg(a));
