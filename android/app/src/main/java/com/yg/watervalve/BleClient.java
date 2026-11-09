@@ -104,6 +104,8 @@ public final class BleClient {
                     .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                     .build();
             scanner.startScan(null, settings, scanCallback);
+            DebugLog.line("ble", "开始扫描（" + (SCAN_MS / 1000) + " 秒），adapter="
+                    + (adapter == null ? "null" : adapter.isEnabled() ? "开" : "关"));
             listener.onLog("开始扫描水表（15 秒）…");
             if (scanStop != null) main.removeCallbacks(scanStop);
             scanStop = this::stopScan;
@@ -151,12 +153,14 @@ public final class BleClient {
             lastEmit.put(addr, now);
             if (!name.isEmpty()) lastNames.put(addr, name);
             selectedName = name;
+            DebugLog.line("ble", "扫描到 " + addr + " name=" + name + " rssi=" + result.getRssi());
             listener.onScan(d, name, result.getRssi());
         }
 
         @Override
         public void onScanFailed(int errorCode) {
             scanning = false;
+            DebugLog.line("ble", "扫描失败 errorCode=" + errorCode);
             listener.onLog("扫描失败，errorCode=" + errorCode);
         }
     };
@@ -186,6 +190,7 @@ public final class BleClient {
         close();
         device = d;
         selectedName = safeName(d);
+        DebugLog.line("ble", "连接 " + selectedName + " (" + d.getAddress() + ")");
         listener.onLog("正在连接 " + selectedName + " (" + d.getAddress() + ")…");
         try {
             gatt = d.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE);
@@ -211,6 +216,7 @@ public final class BleClient {
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
+            DebugLog.line("ble", "GATT 状态变化 status=" + status + " newState=" + newState);
             if (newState == BluetoothGatt.STATE_CONNECTED) {
                 listener.onLog("蓝牙链路已建立，发现服务…");
                 try {
@@ -226,6 +232,7 @@ public final class BleClient {
 
         @Override
         public void onServicesDiscovered(BluetoothGatt g, int status) {
+            DebugLog.line("ble", "发现服务 status=" + status);
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 listener.onConnected(false, "发现服务失败 status=" + status);
                 return;
@@ -251,6 +258,8 @@ public final class BleClient {
                 return;
             }
             int props = writeChar.getProperties();
+            DebugLog.line("ble", "特征就绪 write=" + writeChar.getUuid() + " props=0x"
+                    + Integer.toHexString(props) + " notify=" + notifyChar.getUuid());
             if ((props & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
                 writeChar.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
             } else {
@@ -302,6 +311,7 @@ public final class BleClient {
         public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
             if (writeChar == null || ch == null) return;
             if (!writeChar.getUuid().equals(ch.getUuid())) return;
+            DebugLog.line("ble", "写完成 status=" + status);
             lastWriteStatus = status;
             writeDone = true;
             synchronized (writeLock) {
@@ -313,6 +323,7 @@ public final class BleClient {
         public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic ch) {
             byte[] v = ch.getValue();
             if (v == null || v.length == 0) return;
+            DebugLog.hex("ble", "通知", v);
             rx.append(new String(v, StandardCharsets.US_ASCII));
             parseAvailable();
         }
@@ -374,6 +385,7 @@ public final class BleClient {
             if (rx.length() < total) return;
             String frame = rx.substring(0, total);
             rx.delete(0, total);
+            DebugLog.line("ble", "收帧 " + frame);
             Protocol.Frame f = Protocol.parseFrame(frame);
             if (f != null) frames.offer(f);
         }
@@ -396,11 +408,13 @@ public final class BleClient {
 
     private void writeFrame(String frame) throws IOException, InterruptedException {
         byte[] all = (frame + (char) FRAME_TAIL).getBytes(StandardCharsets.US_ASCII);
+        DebugLog.line("ble", "发帧 " + frame + " (" + all.length + "B)");
         // 整帧一次写：官方 App 就是这么发的（writeCharacteristic 一整帧），
         // 超过 MTU-3 时由 Android 协议栈自动走长写（Prepare/Execute），
         // 模块把整帧当一次 UART 包转给 MCU —— 这是 86 清账能过的前提。
         if (writeWhole(all)) return;
         // 长写不被支持（特征只有无响应写 / 模块拒长写）才退回分片
+        DebugLog.line("ble", "整帧写入失败，退回分片");
         listener.onLog("整帧写入失败，退回 " + CHUNK + " 字节分片（" + all.length + "B）");
         for (int off = 0; off < all.length; off += CHUNK) {
             byte[] part = Arrays.copyOfRange(all, off, Math.min(off + CHUNK, all.length));
@@ -452,6 +466,7 @@ public final class BleClient {
         }
         if (!queued) return false;
         if (type == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+            DebugLog.line("ble", "整帧写入(无响应) queued=" + queued + " len=" + all.length);
             Thread.sleep(60);
             return true;
         }
@@ -461,6 +476,8 @@ public final class BleClient {
                 writeLock.wait(50);
             }
         }
+        DebugLog.line("ble", "整帧写入(带响应) len=" + all.length + " done=" + writeDone
+                + " status=" + lastWriteStatus);
         return writeDone && lastWriteStatus == BluetoothGatt.GATT_SUCCESS;
     }
 
@@ -470,6 +487,7 @@ public final class BleClient {
     }
 
     public void close() {
+        if (gatt != null) DebugLog.line("ble", "关闭 GATT");
         ready = false;
         if (connectTimeout != null) main.removeCallbacks(connectTimeout);
         connectTimeout = null;

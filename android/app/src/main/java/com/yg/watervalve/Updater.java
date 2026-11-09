@@ -260,6 +260,7 @@ public final class Updater {
             c.setRequestProperty("Accept", "application/octet-stream");
             c.setRequestProperty("Accept-Encoding", "identity");
             int code = c.getResponseCode();
+            DebugLog.line("http", "GET " + current + " | HTTP " + code + " | 下载更新包");
             if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
                 String loc = c.getHeaderField("Location");
                 c.disconnect();
@@ -446,6 +447,7 @@ public final class Updater {
     }
 
     private static String fetchText(String url) throws Exception {
+        long t0 = System.currentTimeMillis();
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
         // 手机网络下 github api 偶尔很慢：宁可早点失败让用户重试，也别一直转圈
         c.setConnectTimeout(6000);
@@ -453,7 +455,11 @@ public final class Updater {
         c.setRequestProperty("User-Agent", "WaterValve-Android");
         c.setRequestProperty("Accept", "application/vnd.github+json");
         int code = c.getResponseCode();
-        if (code >= 400) throw new IOException("GitHub HTTP " + code);
+        if (code >= 400) {
+            DebugLog.http("GET", url, null, code, null,
+                    System.currentTimeMillis() - t0, "检查更新", null);
+            throw new IOException("GitHub HTTP " + code);
+        }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (InputStream in = c.getInputStream()) {
             byte[] buf = new byte[8192];
@@ -463,7 +469,11 @@ public final class Updater {
             c.disconnect();
         }
         // 必须整段解码；逐块 new String 会把跨 8192 边界的 UTF-8 汉字拆成两个 �
-        return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        String text = new String(out.toByteArray(), StandardCharsets.UTF_8);
+        DebugLog.http("GET", url, null, code, text.length() > 4000
+                        ? text.substring(0, 4000) + "…(共 " + text.length() + " 字符)" : text,
+                System.currentTimeMillis() - t0, "检查更新", null);
+        return text;
     }
 
     private static String sha256(File f) throws Exception {
