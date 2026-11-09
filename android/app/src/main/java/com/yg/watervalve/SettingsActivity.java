@@ -134,8 +134,13 @@ public class SettingsActivity extends Activity {
             boolean has = !Appearance.bgImage(this).isEmpty();
             clear.setVisibility(has ? View.VISIBLE : View.GONE);
             clear.setOnClickListener(v -> {
+                DebugLog.op("清除自定义背景图");
                 Appearance.clearBgImage(this);
-                recreate();
+                // 背景图是主界面启动时贴上去的，清掉之后已经开着的界面还留着旧图，
+                // 所以要明确提示重启；顺手给一个「立即重启」按钮。
+                confirm("背景图已清除",
+                        "需要重启软件才会恢复默认背景：从后台划掉本应用再打开，或者点下面的「立即重启」。",
+                        "立即重启", this::restartApp, this::recreate);
             });
         }
         View customBtn = findViewById(R.id.btnCustomColor);
@@ -227,6 +232,15 @@ public class SettingsActivity extends Activity {
 
     /** 简单确认框，跟设置页其它弹窗同一套外观。 */
     private void confirm(String titleText, String msg, String okText, final Runnable onOk) {
+        confirm(titleText, msg, okText, onOk, null);
+    }
+
+    /**
+     * @param onOk    点主按钮
+     * @param onClose 关掉弹窗（点取消 / 点空白处）时执行，可为 null
+     */
+    private void confirm(String titleText, String msg, String okText,
+                         final Runnable onOk, final Runnable onClose) {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout box = new LinearLayout(this);
@@ -260,9 +274,11 @@ public class SettingsActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
         olp.topMargin = dp(14);
         box.addView(ok, olp);
+        final boolean[] handled = {false};
         ok.setOnClickListener(v -> {
+            handled[0] = true;
             dialog.dismiss();
-            onOk.run();
+            if (onOk != null) onOk.run();
         });
 
         TextView cancel = new TextView(this);
@@ -276,6 +292,9 @@ public class SettingsActivity extends Activity {
 
         dialog.setContentView(box);
         dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnDismissListener(d -> {
+            if (!handled[0] && onClose != null) onClose.run();
+        });
         dialog.show();
         Window w = dialog.getWindow();
         if (w != null) {
@@ -416,6 +435,18 @@ public class SettingsActivity extends Activity {
             w.setDimAmount(0.35f);
             w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.9f),
                     android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    /** 重启软件：清掉任务栈再起主界面，外观/背景图会重新按当前设置生成。 */
+    private void restartApp() {
+        try {
+            Intent i = new Intent(this, MainActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(i);
+            finish();
+        } catch (Exception e) {
+            toast("自动重启失败，请从后台划掉本应用再打开");
         }
     }
 
