@@ -71,10 +71,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private Button btnSendCode, btnLogin, btnScan, btnQuery, btnWater;
     private TextView btnCopyLog;
     private TextView btnCheckUpdate;
-    private TextView btnXiaolian;
     private TextView btnNotice;
+    private LinearLayout noticeBar;
     private Announcement.Info currentNotice;
-    private LinearLayout deviceList, header, bottomBar, loginFields, logBody, statHistory, accountActions;
+    private LinearLayout deviceList, header, bottomBar, loginFields, logBody, statHistory;
     private ScrollView logScroll;
     private View statusBarScrim, root;
     private ScrollView scroll;
@@ -138,12 +138,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnWater = findViewById(R.id.btnWater);
         btnCopyLog = findViewById(R.id.btnCopyLog);
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate);
-        btnXiaolian = findViewById(R.id.btnXiaolian);
         btnNotice = findViewById(R.id.btnNotice);
         deviceList = findViewById(R.id.deviceList);
         scanHint = findViewById(R.id.scanHint);
         statHistory = findViewById(R.id.statHistory);
-        accountActions = findViewById(R.id.accountActions);
+        noticeBar = findViewById(R.id.noticeBar);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
         statusBarScrim = findViewById(R.id.statusBarScrim);
@@ -298,15 +297,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 checkUpdate(false);
             }
         });
-        btnXiaolian.setOnClickListener(v -> {
-            tap(v);
-            showXiaolianDialog();
-        });
-        btnNotice.setOnClickListener(v -> {
+        noticeBar.setOnClickListener(v -> {
             tap(v);
             if (currentNotice != null) showAnnouncementDialog(currentNotice);
         });
-        updateXiaolianButton();
         requestPerms();
         appendLog("安卓版启动，版本 " + Updater.currentVersion(this));
         String crash = CrashLog.last(this);
@@ -322,9 +316,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void updateXiaolianButton() {
-        if (btnXiaolian == null) return;
-        // 0.6.1 改为趣智校园 /device/info/mac，不再需要笑联登录。
-        btnXiaolian.setVisibility(View.GONE);
+        // 0.6.1 起改用趣智校园 /device/info/mac，「同步官方宿舍名」入口已下线，这里保留空实现
     }
 
     private void showXiaolianDialog() {
@@ -485,13 +477,20 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             if (isFinishing() || isDestroyed()) return;
             if (info == null) {
                 currentNotice = null;
-                btnNotice.setVisibility(View.GONE);
-                if (accountActions != null) accountActions.setVisibility(View.GONE);
+                if (noticeBar != null) noticeBar.setVisibility(View.GONE);
                 return;
             }
             currentNotice = info;
-            btnNotice.setVisibility(View.VISIBLE);
-            if (accountActions != null) accountActions.setVisibility(View.VISIBLE);
+            if (noticeBar != null) {
+                String title = info.title == null || info.title.trim().isEmpty()
+                        ? "有新公告" : info.title.trim();
+                btnNotice.setText(title);
+                noticeBar.setVisibility(View.VISIBLE);
+                noticeBar.setAlpha(0f);
+                noticeBar.setTranslationY(-dp(6));
+                noticeBar.animate().alpha(1f).translationY(0f).setDuration(220)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            }
             if (info.once && Announcement.seen(this, info.id)) return;
             showAnnouncementDialog(info);
         });
@@ -2405,7 +2404,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void setupInteractions() {
         View[] press = {btnWater, btnScan, btnQuery, btnLogin, btnSendCode,
-                btnCopyLog, btnToggleLogin, btnToggleLog, btnCheckUpdate, btnXiaolian};
+                btnCopyLog, btnToggleLogin, btnToggleLog, btnCheckUpdate};
         for (View v : press) pressScale(v);
         scroll.setOnScrollChangeListener((v, sx, sy, oldX, oldY) -> {
             float t = Math.min(1f, sy / (float) dp(140));
