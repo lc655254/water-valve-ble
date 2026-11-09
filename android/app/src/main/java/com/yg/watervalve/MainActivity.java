@@ -13,6 +13,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -38,6 +39,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -86,7 +88,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private long gateCodeSentAt;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     // 连接过程反馈
-    private AlertDialog connectDialog;
+    private Dialog connectDialog;
     private ValveManager.ScanItem connectingItem;
     private String lastOnCharge = "";
 
@@ -1033,24 +1035,68 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void connectTo(ValveManager.ScanItem item) {
         if (item == null) return;
-        String name = item.name == null || item.name.isEmpty() ? "水表" : item.name;
+        final String name = item.name == null || item.name.isEmpty() ? "水表" : item.name;
         connectingItem = item;
         if (connectDialog != null && connectDialog.isShowing()) connectDialog.dismiss();
-        ProgressDialog pd = new ProgressDialog(this);
-        pd.setMessage("正在连接 " + name + " …\n靠近水表，别让官方 App 抢连接");
-        pd.setCancelable(true);
-        pd.setCanceledOnTouchOutside(false);
-        pd.show();
-        connectDialog = pd;
+
+        LinearLayout box = dialogCard();
+        box.addView(dialogLabel("CONNECTING"));
+        box.addView(dialogTitle("正在连接"));
+        box.addView(dialogSub(name));
+
+        final ProgressBar bar = new ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(25);
+        bar.setProgress(0);
+        bar.setProgressTintList(ColorStateList.valueOf(getColor(R.color.primary)));
+        bar.setProgressBackgroundTintList(ColorStateList.valueOf(getColor(R.color.outline)));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(6));
+        blp.topMargin = dp(16);
+        box.addView(bar, blp);
+
+        final TextView elapse = dialogNote("已等 0 秒 · 最多 25 秒");
+        elapse.setPadding(0, dp(9), 0, 0);
+        box.addView(elapse);
+
+        TextView note = dialogNote("靠近水表 3 米内；先关掉官方水控 App，别让它抢连接。");
+        note.setPadding(0, dp(6), 0, 0);
+        box.addView(note);
+
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(false);
+        TextView cancel = dialogGhost("取消连接");
+        cancel.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
+        clp.topMargin = dp(6);
+        box.addView(cancel, clp);
+
+        showStyledDialog(dialog, box, 0.86f);
+        connectDialog = dialog;
         manager.connect(item);
+
         final long t0 = System.currentTimeMillis();
         uiHandler.post(new Runnable() {
             @Override
             public void run() {
-                if (connectDialog != pd) return;
-                if (!pd.isShowing()) return;
+                if (connectDialog != dialog) return;
+                if (!dialog.isShowing()) return;
+                int sec = (int) ((System.currentTimeMillis() - t0) / 1000);
+                bar.setProgress(Math.min(sec, 25));
+                if (sec < 3) {
+                    elapse.setText("已等 " + sec + " 秒 · 最多 25 秒");
+                } else if (sec < 12) {
+                    elapse.setText("已等 " + sec + " 秒 · 正在找水表服务…");
+                } else {
+                    elapse.setText("已等 " + sec + " 秒 · 信号弱，再等等…");
+                }
                 if (manager.isConnected()) {
-                    pd.dismiss();
+                    dialog.dismiss();
                     connectDialog = null;
                     connected = true;
                     renderWaterStatus();
@@ -1058,73 +1104,284 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                     manager.query();
                     return;
                 }
-                if (System.currentTimeMillis() - t0 > 25000) {
-                    pd.dismiss();
+                if (sec >= 25) {
+                    dialog.dismiss();
                     connectDialog = null;
                     showConnectFailed(item);
                     return;
                 }
-                uiHandler.postDelayed(this, 350);
+                uiHandler.postDelayed(this, 400);
             }
         });
     }
 
+    /** 连接失败：一句话原因 + 最多三步能立刻做的事，按钮「重试 / 看排查 / 知道了」 */
     private void showConnectFailed(ValveManager.ScanItem item) {
-        String name = item == null || item.name == null || item.name.isEmpty()
+        if (isFinishing() || isDestroyed()) return;
+        final String name = item == null || item.name == null || item.name.isEmpty()
                 ? "水表" : item.name;
-        new AlertDialog.Builder(this)
-                .setTitle("连不上 " + name)
-                .setMessage(explainConnectError(manager.getLastConnectError()))
-                .setPositiveButton("重试", (d, w) -> {
-                    d.dismiss();
-                    connectTo(item);
-                })
-                .setNeutralButton("排查", (d, w) -> {
-                    d.dismiss();
-                    showTroubleshoot();
-                })
-                .setNegativeButton("知道了", (d, w) -> d.dismiss())
-                .show();
+        final String err = manager.getLastConnectError();
+
+        LinearLayout box = dialogCard();
+        box.addView(dialogLabel("CONNECT FAILED"));
+        box.addView(dialogTitle("连不上水表"));
+
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams chp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        chp.topMargin = dp(10);
+        chips.setLayoutParams(chp);
+        chips.addView(dialogChip(name));
+        String code = errorCodeLabel(err);
+        if (!code.isEmpty()) {
+            TextView c = dialogChip(code);
+            LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            clp2.leftMargin = dp(8);
+            chips.addView(c, clp2);
+        }
+        box.addView(chips);
+
+        TextView cause = dialogBody(connectCause(err));
+        cause.setPadding(0, dp(14), 0, 0);
+        box.addView(cause);
+
+        TextView steps = dialogNote(connectSteps(err));
+        steps.setPadding(0, dp(8), 0, 0);
+        box.addView(steps);
+
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        Button retry = dialogPrimary("重试");
+        retry.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+            connectTo(item);
+        });
+        box.addView(retry);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        TextView fix = dialogGhost("看排查");
+        fix.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+            showTroubleshoot();
+        });
+        TextView ok = dialogGhost("知道了");
+        ok.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+        });
+        row.addView(fix, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        row.addView(ok, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        rlp.topMargin = dp(2);
+        box.addView(row, rlp);
+
+        showStyledDialog(dialog, box, 0.9f);
     }
 
-    private String explainConnectError(String err) {
+    /** 一句话说清最可能的原因 */
+    private String connectCause(String err) {
         String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
-        StringBuilder sb = new StringBuilder();
-        if (e.contains("133")) {
-            sb.append("系统蓝牙报 133（GATT_ERROR）：这台水表大概率已经被别的设备占着。\n\n")
-                    .append("① 关掉手机上官方水控 App —— 它连着表时，别的设备连不上\n")
-                    .append("② 系统蓝牙设置里找到 KLCXKJ-Water，点「断开 / 取消配对」\n")
-                    .append("③ 手机靠近水表 3 米内再试\n");
-        } else if (e.contains("超时") || e.contains("timeout")) {
-            sb.append("连接超时：水表广播稀疏或信号太弱。\n\n")
-                    .append("① 靠近到 3 米内再扫\n")
-                    .append("② 关掉官方 App，别让它抢连接\n")
-                    .append("③ 水表正在放水 / 刷卡时会停止广播，等一会儿再扫\n");
-        } else if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
-            sb.append("连上了但没找到 FF02/FF01 特征：可能连到了别的设备或固件不同。\n\n")
-                    .append("① 确认选的是 KLCXKJ-Water\n")
-                    .append("② 断开后重新扫描再连\n");
-        } else {
-            sb.append("连接失败");
-            if (err != null && !err.isEmpty()) sb.append("：").append(err);
-            sb.append("\n\n常见原因：① 已被官方 App 占用 ② 信号太弱 ③ 水表休眠。\n");
+        if (e.contains("133")) return "这台水表大概率已经被别的设备占着（GATT 133）。";
+        if (e.contains("超时") || e.contains("timeout")) return "连接超时：水表广播稀疏或信号太弱。";
+        if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
+            return "连上了，但没找到 FF02 / FF01 特征。";
         }
-        sb.append("\n连上以后如果一直停在「结算中」，点开水会先自动补结算。");
-        return sb.toString();
+        if (e.isEmpty()) return "没能连上水表。";
+        return "连接失败：" + err;
+    }
+
+    /** 最多三条能立刻做的动作 */
+    private String connectSteps(String err) {
+        String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
+        if (e.contains("133")) {
+            return "① 关掉官方水控 App —— 它连着表时，别的设备连不上\n"
+                    + "② 系统蓝牙里找到 KLCXKJ-Water，点「断开 / 取消配对」\n"
+                    + "③ 手机靠近水表 3 米内再试";
+        }
+        if (e.contains("超时") || e.contains("timeout")) {
+            return "① 靠近到 3 米内再扫\n"
+                    + "② 关掉官方 App，别让它抢连接\n"
+                    + "③ 水表放水 / 刷卡时会停广播，等一会儿再扫";
+        }
+        if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
+            return "① 确认选的是 KLCXKJ-Water\n"
+                    + "② 断开后重新扫描再连";
+        }
+        return "① 关掉官方水控 App\n"
+                + "② 系统蓝牙里断开 KLCXKJ-Water\n"
+                + "③ 靠近水表重试，还不行就给水表断电重启";
+    }
+
+    /** 把错误里的关键码抽成一个短标签，比如「错误 133」「超时」「FF02」 */
+    private String errorCodeLabel(String err) {
+        if (err == null || err.isEmpty()) return "";
+        Matcher m = Pattern.compile("(?i)(133|ff0[12]|timeout|超时)").matcher(err);
+        if (!m.find()) return "";
+        String g = m.group(1).toLowerCase(Locale.ROOT);
+        if ("timeout".equals(g) || "超时".equals(g)) return "超时";
+        if (g.startsWith("ff")) return g.toUpperCase(Locale.ROOT);
+        return "错误 " + g;
     }
 
     private void showTroubleshoot() {
-        new AlertDialog.Builder(this)
-                .setTitle("连不上水表？按顺序试")
-                .setMessage("① 关掉官方水控 App（趣智校园 / 水控助手）\n"
-                        + "② 系统蓝牙里找到 KLCXKJ-Water，取消配对 / 断开\n"
-                        + "③ 手机贴近水表 3 米内，重新扫描\n"
-                        + "④ 水表在放水 / 刷卡时会停止广播，等它闲下来\n"
-                        + "⑤ 还不行就给水表断电重启（拔电池 / 关空开）\n\n"
-                        + "连上后如果状态是「结算中」，说明上次用水没结算完，"
-                        + "点开水会自动补结算，不用手动处理。")
-                .setPositiveButton("知道了", (d, w) -> d.dismiss())
-                .show();
+        if (isFinishing() || isDestroyed()) return;
+        LinearLayout box = dialogCard();
+        box.addView(dialogLabel("TROUBLESHOOT"));
+        box.addView(dialogTitle("连不上水表？按顺序试"));
+        TextView body = dialogNote("① 关掉官方水控 App（趣智校园 / 水控助手）\n"
+                + "② 系统蓝牙里找到 KLCXKJ-Water，取消配对 / 断开\n"
+                + "③ 手机贴近水表 3 米内，重新扫描\n"
+                + "④ 水表放水 / 刷卡时会停广播，等它闲下来\n"
+                + "⑤ 还不行就给水表断电重启（拔电池 / 关空开）");
+        body.setTextSize(12.5f);
+        body.setLineSpacing(dp(5), 1f);
+        body.setPadding(0, dp(14), 0, 0);
+        box.addView(body);
+        TextView tail = dialogNote("连上后如果状态是「结算中」，说明上次用水没结算完，点开水会自动补结算。");
+        tail.setPadding(0, dp(10), 0, 0);
+        box.addView(tail);
+
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        Button ok = dialogPrimary("知道了");
+        ok.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+        });
+        box.addView(ok);
+        showStyledDialog(dialog, box, 0.9f);
+    }
+
+    // ---- 弹窗零件：和公告 / 更新弹窗同一套圆角卡片风格 ----
+
+    private LinearLayout dialogCard() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(16));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+        return box;
+    }
+
+    private TextView dialogLabel(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(10);
+        v.setLetterSpacing(0.18f);
+        v.setTextColor(getColor(R.color.primary));
+        return v;
+    }
+
+    private TextView dialogTitle(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(20);
+        v.setTextColor(getColor(R.color.ink));
+        v.setTypeface(null, android.graphics.Typeface.BOLD);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    private TextView dialogSub(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(12.5f);
+        v.setTextColor(getColor(R.color.muted));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(6);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    private TextView dialogBody(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(13.5f);
+        v.setTextColor(getColor(R.color.ink));
+        v.setLineSpacing(dp(3), 1f);
+        return v;
+    }
+
+    private TextView dialogNote(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(11.5f);
+        v.setTextColor(getColor(R.color.muted));
+        v.setLineSpacing(dp(4), 1f);
+        return v;
+    }
+
+    private TextView dialogChip(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(11);
+        v.setTextColor(getColor(R.color.muted));
+        v.setBackgroundResource(R.drawable.bg_chip_light);
+        v.setPadding(dp(10), dp(5), dp(10), dp(5));
+        v.setSingleLine(true);
+        return v;
+    }
+
+    private Button dialogPrimary(String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setTextSize(15);
+        b.setTextColor(Color.WHITE);
+        b.setBackgroundResource(R.drawable.bg_button_primary);
+        b.setStateListAnimator(null);
+        b.setMinHeight(0);
+        b.setMinWidth(0);
+        b.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        lp.topMargin = dp(16);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    private TextView dialogGhost(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(13);
+        v.setTextColor(getColor(R.color.primary));
+        v.setGravity(Gravity.CENTER);
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        return v;
+    }
+
+    private void showStyledDialog(Dialog d, View content, float widthRatio) {
+        d.setContentView(content);
+        d.show();
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            w.setDimAmount(0.35f);
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * widthRatio),
+                    WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        content.setAlpha(0f);
+        content.setScaleX(0.96f);
+        content.setScaleY(0.96f);
+        content.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(180).setInterpolator(new DecelerateInterpolator()).start();
     }
 
     private void pulseView(View v) {

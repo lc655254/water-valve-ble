@@ -255,34 +255,65 @@ public final class Updater {
         }
     }
 
+    /**
+     * 从 release body 里挑出「Android」小节的更新说明。
+     * body 里会同时堆着 Windows 小节和历史 Android 小节，所以按小节标题里的版本号取最大的那段，
+     * 而不是取第一段（否则永远显示最老的那次）。
+     */
     private static String androidNotes(String body) {
         if (body == null) return "";
         String[] lines = body.replace("\r", "").split("\n");
-        StringBuilder sb = new StringBuilder();
-        boolean inAndroid = false;
+        StringBuilder cur = null;
+        StringBuilder best = null;
+        String bestVer = "";
         for (String raw : lines) {
             String t = raw.trim();
-            if (t.isEmpty()) continue;
-            String low = t.toLowerCase(Locale.ROOT);
-            boolean start = low.startsWith("## android")
-                    || low.startsWith("# android")
-                    || low.matches("^android\\s+v?[0-9].*");
-            if (start) {
-                inAndroid = true;
+            if (t.startsWith("#")) {
+                String bare = t.toLowerCase(Locale.ROOT).replaceAll("^#+\\s*", "");
+                boolean android = bare.startsWith("android");
+                cur = android ? new StringBuilder() : null;
+                if (android) {
+                    String v = firstVersion(t);
+                    if (best == null || cmpVersion(v, bestVer) > 0) {
+                        best = cur;
+                        bestVer = v;
+                    }
+                }
                 continue;
             }
-            if (!inAndroid) continue;
-            if (low.startsWith("## ") || low.startsWith("# ")
-                    || low.matches("^windows\\s+v?[0-9].*")) break;
-            if (t.startsWith("```")) continue;
-            String line = t.replaceFirst("^[-*+]\\s*", "• ");
-            if (sb.length() + line.length() > 600) break;
-            sb.append(line).append('\n');
+            if (cur == null || t.isEmpty() || t.startsWith("```")) continue;
+            if (cur.length() > 700) continue;
+            cur.append(t.replaceFirst("^[-*+]\\s*", "• ")).append('\n');
         }
-        String s = sb.toString().trim();
+        String s = best == null ? "" : best.toString().trim();
         if (!s.isEmpty()) return s;
         s = body.trim();
         return s.length() > 360 ? s.substring(0, 360) + "…" : s;
+    }
+
+    private static String firstVersion(String s) {
+        Matcher m = Pattern.compile("([0-9]+(?:\\.[0-9]+){1,3})").matcher(s);
+        return m.find() ? m.group(1) : "";
+    }
+
+    private static int cmpVersion(String a, String b) {
+        String[] x = a == null || a.isEmpty() ? new String[0] : a.split("\\.");
+        String[] y = b == null || b.isEmpty() ? new String[0] : b.split("\\.");
+        int n = Math.max(x.length, y.length);
+        for (int i = 0; i < n; i++) {
+            int xi = i < x.length ? intOf(x[i]) : 0;
+            int yi = i < y.length ? intOf(y[i]) : 0;
+            if (xi != yi) return xi > yi ? 1 : -1;
+        }
+        return 0;
+    }
+
+    private static int intOf(String s) {
+        try {
+            return Integer.parseInt(s);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private static JSONObject getJson(String url) throws Exception {
