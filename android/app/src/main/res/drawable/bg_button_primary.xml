@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 主按钮：上下微渐变，比纯色更有厚度 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#33FFFFFF">
     <item>
         <shape>
-            <solid android:color="@color/primary" />
+            <gradient
+                android:angle="270"
+                android:endColor="@color/btn_primary_bottom"
+                android:startColor="@color/btn_primary_top"
+                android:type="linear" />
             <corners android:radius="999dp" />
         </shape>
     </item>

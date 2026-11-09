@@ -24,8 +24,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
-import android.text.TextWatcher;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -1964,16 +1968,30 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         Matcher m = Pattern.compile("本次：(\\d+) 秒 · ([\\d.]+) L · 省 ¥([\\d.]+)")
                 .matcher(text);
         if (m.find()) {
-            statLastMain.setText(m.group(2) + " L");
+            statLastMain.setText(statValue(m.group(2), "L"));
             statLastSub.setText(m.group(1) + " 秒 · 省 ¥" + m.group(3));
         }
         Matcher t = Pattern.compile("累计：(\\d+) 次 · ([\\d.]+) L · 省 ¥([\\d.]+)")
                 .matcher(text);
         if (t.find()) {
-            statTotalMain.setText(t.group(2) + " L");
+            statTotalMain.setText(statValue(t.group(2), "L"));
             statTotalSub.setText(t.group(1) + " 次 · 省 ¥" + t.group(3));
         }
         renderHistory();
+    }
+
+    /** 数值 + 单位：数字保持大号，单位缩到 52% 并转灰，读数更清爽 */
+    private CharSequence statValue(String num, String unit) {
+        String text = num + " " + unit;
+        SpannableString sp = new SpannableString(text);
+        int start = num.length() + 1;
+        if (start < text.length()) {
+            sp.setSpan(new RelativeSizeSpan(0.52f), start, text.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sp.setSpan(new ForegroundColorSpan(getColor(R.color.muted)), start, text.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        return sp;
     }
 
     /** 省钱账本下面的「最近记录」：时间 · 用量 · 时长 · 省下 */
@@ -1985,6 +2003,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         TextView head = new TextView(this);
         head.setText("最近记录");
         head.setTextSize(10);
+        head.setLetterSpacing(0.08f);
         head.setTextColor(getColor(R.color.muted));
         head.setPadding(0, 0, 0, dp(2));
         statHistory.addView(head);
@@ -1993,11 +2012,18 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             org.json.JSONObject r = arr.optJSONObject(i);
             if (r == null) continue;
             String when = f.format(new Date(r.optLong("ts", 0)));
+            // 行间一条极细分割线，方便一条条读
+            View div = new View(this);
+            div.setBackgroundColor(getColor(R.color.line));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+            dlp.topMargin = dp(1);
+            statHistory.addView(div, dlp);
             // 左：时间 + 用量 + 时长；右：省下的钱（右对齐，方便扫一眼对比）
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(4), 0, dp(4));
+            row.setPadding(0, dp(6), 0, dp(6));
             TextView left = new TextView(this);
             left.setText(String.format(Locale.CHINA, "%s · %s%.1f L · %d 秒",
                     when, r.optBoolean("estimated", false) ? "约 " : "",
@@ -2006,6 +2032,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             left.setTextColor(getColor(R.color.ink));
             left.setSingleLine(true);
             left.setEllipsize(TextUtils.TruncateAt.END);
+            left.setFontFeatureSettings("tnum");
             row.addView(left, new LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             TextView right = new TextView(this);
@@ -2013,6 +2040,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             right.setTextSize(11.5f);
             right.setTextColor(getColor(R.color.success));
             right.setSingleLine(true);
+            right.setFontFeatureSettings("tnum");
             LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
