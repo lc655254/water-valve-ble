@@ -88,6 +88,11 @@ public class SettingsActivity extends Activity {
         setupAppearance();
         setupDebug();
         setupBilling();
+        View billsBtn = findViewById(R.id.settingsBills);
+        if (billsBtn != null) billsBtn.setOnClickListener(v -> {
+            DebugLog.op("查看本月账单");
+            showBills();
+        });
 
         // 实验开关：零用量时连费率一起清零
         TextView zeroRate = findViewById(R.id.zeroRateSwitch);
@@ -215,6 +220,79 @@ public class SettingsActivity extends Activity {
             if (isFinishing() || isDestroyed()) return;
             confirm("计费自检结果", text, "知道了", null);
         }));
+    }
+
+    // ── 账单 ────────────────────────────────────────────────
+    /** 本月消费 / 充值 / 退款逐笔列出来：扣钱和加钱分别走哪条记录，一眼能看出来 */
+    private void showBills() {
+        final Cloud.Session s = Cloud.Session.fromJson(
+                getSharedPreferences("water_valve", MODE_PRIVATE).getString("session", ""));
+        if (s == null) {
+            toast("先登录再查账单");
+            return;
+        }
+        toast("正在查账单…");
+        new Thread(() -> {
+            StringBuilder sb = new StringBuilder();
+            try {
+                String month = new java.text.SimpleDateFormat("yyyy-MM", Locale.CHINA)
+                        .format(new java.util.Date());
+                org.json.JSONArray bills = Cloud.bills(s, month, 1);
+                DebugLog.line("bill", "账单查询：" + bills.length() + " 条（" + month + "）");
+                int n = 0;
+                for (int i = bills.length() - 1; i >= 0 && n < 12; i--) {
+                    org.json.JSONObject b = bills.optJSONObject(i);
+                    if (b == null) continue;
+                    int type = b.optInt("billType", 0);
+                    String line = null;
+                    if (type == 2) {
+                        org.json.JSONObject c = b.optJSONObject("consumeBillDTO");
+                        if (c != null) {
+                            line = String.format(Locale.CHINA, "消费  %s  ¥%.3f  %s",
+                                    shortTime(c.optString("consumeDate", "")),
+                                    c.optDouble("consumeMoney", 0),
+                                    c.optString("description", ""));
+                        }
+                    } else if (type == 1) {
+                        org.json.JSONObject r = b.optJSONObject("rechargeBillDTO");
+                        if (r != null) {
+                            line = String.format(Locale.CHINA, "充值  %s  +¥%.3f  %s",
+                                    shortTime(r.optString("dealDate", "")),
+                                    r.optDouble("dealMoney", 0),
+                                    r.optString("typeName", ""));
+                        }
+                    } else if (type == 3) {
+                        org.json.JSONObject f = b.optJSONObject("refundBillDTO");
+                        if (f != null) {
+                            line = String.format(Locale.CHINA, "退款  %s  +¥%.3f  %s",
+                                    shortTime(f.optString("dealDate", "")),
+                                    f.optDouble("dealMoney", 0),
+                                    f.optString("typeName", ""));
+                        }
+                    }
+                    if (line == null) continue;
+                    sb.append(line).append('\n');
+                    n++;
+                }
+                if (n == 0) sb.append("本月还没有账单记录\n");
+                sb.append("\n余额：").append(Cloud.fmtMoney(s.balance)).append(" 元");
+                sb.append("\n\n充值 / 退款由云端支付渠道记账，本页只读展示。");
+            } catch (Exception e) {
+                sb.append("查询失败：").append(e.getMessage());
+                DebugLog.exc("bill", e);
+            }
+            final String text = sb.toString();
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                confirm("本月账单", text, "知道了", null);
+            });
+        }).start();
+    }
+
+    private static String shortTime(String s) {
+        if (s == null) return "";
+        String t = s.trim().replace('T', ' ');
+        return t.length() >= 16 ? t.substring(5, 16) : t;
     }
 
     // ── 调试日志 ────────────────────────────────────────────

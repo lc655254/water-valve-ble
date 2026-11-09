@@ -1,6 +1,24 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.7）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.8）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.8 账单页：看清钱怎么扣、怎么加（2026-11-10）
+
+设置 → 关于 → 「账单」列出本月逐笔记录：
+
+- `billType=2` → `consumeBillDTO`：`consumeMoney`（实扣，元）、`preDeductMoney`（预扣）、`consumeDate`、`orderId`
+- `billType=1` → `rechargeBillDTO`：`dealMoney`、`dealDate`、`typeName`（如「支付宝代扣充值」）
+- `billType=3` → `refundBillDTO`：结算差额退回
+
+扣款链路（服务端记账，客户端只触发）：
+
+1. `POST /order/ali/downRate/bluetooth/rateOrder` → 返回 `preDeductMoney`、`useCount`、`rate`、`downData`；
+   钱包立刻 `4.600 → 0.000`（冻结）
+2. `POST /order/upload/bluetooth/data`（上传 85 流水）→ 返回 `consumeMoney`、`preDeductMoneyAfter`、`clData`
+3. 结算后钱包回到 `4.600`（`consumeMoney=0` 时全额退回）
+
+加钱只有两条服务端路径：支付渠道回调（充值）、结算差额退回（退款）。`/account/wallet` 是只读接口，
+`accountRealMoney` 单位是厘，客户端没有「设置余额」的入口。
 
 ## 0.12.7 日志一键分享（2026-11-10）
 
@@ -306,7 +324,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.7（versionCode 67），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.8（versionCode 68），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
