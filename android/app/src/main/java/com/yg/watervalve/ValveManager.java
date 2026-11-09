@@ -298,6 +298,21 @@ public final class ValveManager {
         close("用户关水");
     }
 
+    /**
+     * 占用检测用：中断当前这次连接尝试。
+     * 只关掉 GATT，不触发自动重连，也不当成业务失败。
+     */
+    public void cancelConnect() {
+        io.execute(() -> {
+            try {
+                ble.close();
+            } catch (Exception ignored) {
+            }
+            setBusy(false, "");
+            notifyConnection(false);
+        });
+    }
+
     public void close(String reason) {
         if (closing) return;
         if (busy) {
