@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 页面背景：竖向浅渐变 + 右上/左侧两团柔光，卡片浮在上面有层次 -->
+<!-- 页面背景：中性微渐变 + 顶部一层极淡的高光，不放彩色光团，干净不抢内容 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
@@ -12,33 +12,14 @@
     </item>
 
     <item
-        android:width="300dp"
-        android:height="300dp"
-        android:gravity="top|end">
-        <shape android:shape="oval">
+        android:height="260dp"
+        android:gravity="top">
+        <shape android:shape="rectangle">
             <gradient
-                android:centerX="0.5"
-                android:centerY="0.5"
+                android:angle="270"
                 android:endColor="@android:color/transparent"
-                android:gradientRadius="150dp"
-                android:startColor="@color/blob_1"
-                android:type="radial" />
-        </shape>
-    </item>
-
-    <item
-        android:width="240dp"
-        android:height="240dp"
-        android:gravity="top|start"
-        android:top="240dp">
-        <shape android:shape="oval">
-            <gradient
-                android:centerX="0.5"
-                android:centerY="0.5"
-                android:endColor="@android:color/transparent"
-                android:gradientRadius="120dp"
-                android:startColor="@color/blob_2"
-                android:type="radial" />
+                android:startColor="@color/page_sheen"
+                android:type="linear" />
         </shape>
     </item>
 </layer-list>

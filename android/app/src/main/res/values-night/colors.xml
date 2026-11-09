@@ -24,11 +24,10 @@
     <color name="badge_green_bg">#10291F</color>
     <color name="accent_soft">#16203A</color>
     <color name="bound_line">#2E4A7A</color>
-    <!-- 页面背景：深色下更深一档，柔光团压暗 -->
-    <color name="page_top">#0D1219</color>
-    <color name="page_bottom">#080B11</color>
-    <color name="blob_1">#332557F6</color>
-    <color name="blob_2">#1F3B82F6</color>
+    <!-- 页面背景：深色下更深一档，顶部只留一点高光 -->
+    <color name="page_top">#0E1219</color>
+    <color name="page_bottom">#07090E</color>
+    <color name="page_sheen">#14FFFFFF</color>
     <color name="btn_primary_top">#5C88FF</color>
     <color name="btn_primary_bottom">#3F6BEF</color>
     <!-- 关水按钮：深色模式红色更亮一档，字仍用白 -->
