@@ -46,10 +46,14 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -1165,11 +1169,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        TextView fix = dialogGhost("看排查");
+        TextView fix = dialogGhost("按提示排查");
         fix.setOnClickListener(v -> {
             tap(v);
             dialog.dismiss();
-            showTroubleshoot();
+            showDiagWizard("b1");
         });
         TextView ok = dialogGhost("知道了");
         ok.setOnClickListener(v -> {
@@ -1188,38 +1192,41 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         showStyledDialog(dialog, box, 0.9f);
     }
 
-    /** 一句话说清最可能的原因 */
+    /** 一句话说清最可能的原因：扫到了却连不上，基本都是「有人占着这块表」 */
     private String connectCause(String err) {
         String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
-        if (e.contains("133")) return "这台水表大概率已经被别的设备占着（GATT 133）。";
-        if (e.contains("超时") || e.contains("timeout")) return "连接超时：水表广播稀疏或信号太弱。";
         if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
-            return "连上了，但没找到 FF02 / FF01 特征。";
+            return "连上了，但没找到 FF02 / FF01 特征：可能连到了别的设备。";
         }
-        if (e.isEmpty()) return "没能连上水表。";
-        return "连接失败：" + err;
+        if (e.contains("133")) {
+            return "极大概率有人正连着这块表（官方 App 或别人的手机）—— 水表一次只接受一个连接。";
+        }
+        if (e.contains("超时") || e.contains("timeout")) {
+            return "多半还是被占着；也可能是等待时走远了、信号掉了。";
+        }
+        return "连不上这块表，最常见的原因就是已经有人连着它了。";
     }
 
     /** 最多三条能立刻做的动作 */
     private String connectSteps(String err) {
         String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
-        if (e.contains("133")) {
-            return "① 关掉官方水控 App —— 它连着表时，别的设备连不上\n"
-                    + "② 系统蓝牙里找到 KLCXKJ-Water，点「断开 / 取消配对」\n"
-                    + "③ 手机靠近水表 3 米内再试";
-        }
-        if (e.contains("超时") || e.contains("timeout")) {
-            return "① 靠近到 3 米内再扫\n"
-                    + "② 关掉官方 App，别让它抢连接\n"
-                    + "③ 水表放水 / 刷卡时会停广播，等一会儿再扫";
-        }
         if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
             return "① 确认选的是 KLCXKJ-Water\n"
                     + "② 断开后重新扫描再连";
         }
+        if (e.contains("133")) {
+            return "① 关掉官方水控 App，后台也要划掉\n"
+                    + "② 有同学正在用水，等他关水退出\n"
+                    + "③ 等 10 秒再点重试";
+        }
+        if (e.contains("超时") || e.contains("timeout")) {
+            return "① 站到水表 1 米内\n"
+                    + "② 关掉官方 App，别让它抢连接\n"
+                    + "③ 点重试；还不行就按提示一步步排查";
+        }
         return "① 关掉官方水控 App\n"
                 + "② 系统蓝牙里断开 KLCXKJ-Water\n"
-                + "③ 靠近水表重试，还不行就给水表断电重启";
+                + "③ 点重试；还不行就按提示一步步排查";
     }
 
     /** 把错误里的关键码抽成一个短标签，比如「错误 133」「超时」「FF02」 */
@@ -1233,33 +1240,253 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         return "错误 " + g;
     }
 
-    private void showTroubleshoot() {
-        if (isFinishing() || isDestroyed()) return;
-        LinearLayout box = dialogCard();
-        box.addView(dialogLabel("TROUBLESHOOT"));
-        box.addView(dialogTitle("连不上水表？按顺序试"));
-        TextView body = dialogNote("① 关掉官方水控 App（趣智校园 / 水控助手）\n"
-                + "② 系统蓝牙里找到 KLCXKJ-Water，取消配对 / 断开\n"
-                + "③ 手机贴近水表 3 米内，重新扫描\n"
-                + "④ 水表放水 / 刷卡时会停广播，等它闲下来\n"
-                + "⑤ 还不行就给水表断电重启（拔电池 / 关空开）");
-        body.setTextSize(12.5f);
-        body.setLineSpacing(dp(5), 1f);
-        body.setPadding(0, dp(14), 0, 0);
-        box.addView(body);
-        TextView tail = dialogNote("连上后如果状态是「结算中」，说明上次用水没结算完，点开水会自动补结算。");
-        tail.setPadding(0, dp(10), 0, 0);
-        box.addView(tail);
+    // ================= 排查向导：按实际情况点下一步 =================
 
+    private static final String ACT_SCAN = "scan";
+    private static final String ACT_CONNECT = "connect";
+    private static final String ACT_CLOSE = "close";
+
+    private static final class DiagOption {
+        final String label;
+        final String next;
+        final String action;
+
+        DiagOption(String label, String next, String action) {
+            this.label = label;
+            this.next = next;
+            this.action = action;
+        }
+    }
+
+    private static final class DiagStep {
+        final String label;
+        final String title;
+        final String body;
+        final DiagOption[] options;
+
+        DiagStep(String label, String title, String body, DiagOption... options) {
+            this.label = label;
+            this.title = title;
+            this.body = body;
+            this.options = options;
+        }
+    }
+
+    private static DiagOption go(String label, String next) {
+        return new DiagOption(label, next, null);
+    }
+
+    private static DiagOption act(String label, String action) {
+        return new DiagOption(label, null, action);
+    }
+
+    /**
+     * 排查树：
+     * A 系列 = 扫不到水表（广播弱 / 距离远 / 金属遮挡 / 干扰 → 蓝牙没开 → 官方 App 对照 → 报修）
+     * B 系列 = 扫到了但连不上（基本是被别人占着 → 旧配对 → 水表忙 → 断电重启 → 报修）
+     */
+    private Map<String, DiagStep> buildDiagSteps() {
+        Map<String, DiagStep> m = new LinkedHashMap<>();
+
+        m.put("a1", new DiagStep("排查 · 1 / 3", "附近扫不到水表",
+                "先确认三件事：手机蓝牙开着、人离水表 3 米内、中间别隔着铁皮或配电箱。\n\n你现在是什么情况？",
+                go("我就在水表旁边（1 米内）", "a2"),
+                go("还隔着几米，或者隔着墙 / 铁皮", "a_far"),
+                go("不确定手机蓝牙开没开", "a_bt")));
+
+        m.put("a_far", new DiagStep("排查 · 走近再扫", "先走近，再扫一次",
+                "水表广播功率很小，通常 3 米内最稳。\n\n"
+                        + "① 走到水表跟前，手机贴近表面板\n"
+                        + "② 避开铁皮门、配电箱、消防箱这类金属遮挡\n"
+                        + "③ 教室 / 宿舍里蓝牙设备太多也会互相干扰，换个角度再扫",
+                act("走近了，重新扫描", ACT_SCAN),
+                go("就在旁边，还是扫不到", "a2")));
+
+        m.put("a_bt", new DiagStep("排查 · 蓝牙", "先把手机蓝牙打开",
+                "① 下拉控制中心打开蓝牙\n"
+                        + "② 刚打开的话等 5 秒再扫\n"
+                        + "③ 安卓 12 以上要给本 App「附近的设备」权限，否则一个水表都扫不到",
+                act("蓝牙已开，重新扫描", ACT_SCAN),
+                go("开了还是扫不到", "a2")));
+
+        m.put("a2", new DiagStep("排查 · 2 / 3", "旁边有金属遮挡或很多蓝牙设备吗？",
+                "铁皮柜、配电箱、消防箱会挡住信号；周围蓝牙设备太多也会互相干扰。\n\n"
+                        + "把手机贴到水表面板上、换个位置再扫一次，成功率会高很多。",
+                act("换个位置重新扫描", ACT_SCAN),
+                go("贴上去了还是扫不到", "a3")));
+
+        m.put("a3", new DiagStep("排查 · 3 / 3", "用官方 App 对照一下",
+                "打开学校官方水控 App（趣智校园 / 水控助手），用它里面的「搜索水表 / 添加设备」找一下这块表。\n\n"
+                        + "• 官方 App 也找不到 → 水表根本没在广播，属于设备故障\n"
+                        + "• 官方 App 能找到 → 是我们这边的问题，按下一步处理",
+                go("官方 App 也找不到", "a_broken"),
+                go("官方 App 能找到", "a_ours")));
+
+        m.put("a_broken", new DiagStep("结论 · 建议报修", "水表可能没电或模块故障，报修就行",
+                "官方 App 也搜不到，说明这块表没有在广播：常见是电池没电、表内蓝牙模块故障，或者这一片断电了。\n\n"
+                        + "报修时把这句话发给对方：\n"
+                        + "「KLCXKJ 水表蓝牙搜不到，官方 App 也搜不到，疑似电池或模块故障」\n\n"
+                        + "知道水表编号 / MAC 的话一起发过去，师傅能直接定位。",
+                act("再扫一次试试", ACT_SCAN),
+                act("知道了", ACT_CLOSE)));
+
+        m.put("a_ours", new DiagStep("结论 · 是我们这边的问题", "官方能搜到，按三步恢复",
+                "说明水表在正常广播，问题出在手机这一侧：\n\n"
+                        + "① 系统蓝牙里找到 KLCXKJ-Water，点「取消配对 / 忘记此设备」\n"
+                        + "② 完全退出官方 App（后台也划掉）—— 它连着表时别的设备连不上\n"
+                        + "③ 关掉手机蓝牙再打开，回来重新扫描",
+                act("三步做完了，重新扫描", ACT_SCAN),
+                go("还是不行", "a_last")));
+
+        m.put("a_last", new DiagStep("最后一招", "换台手机对照一下",
+                "① 重启手机，清掉蓝牙栈的缓存状态，再扫\n"
+                        + "② 用另一台手机装本 App 试：能连上就说明是这台手机的蓝牙问题；两台都扫不到，基本就是水表侧的问题，报修。",
+                act("重启后再扫一次", ACT_SCAN),
+                act("知道了", ACT_CLOSE)));
+
+        m.put("b1", new DiagStep("排查 · 1 / 3", "连不上这块水表",
+                "扫到了却连不上，最常见的原因是：这块表已经被别人连着 —— 别人的手机、还开着的官方 App，"
+                        + "或者上一次连接没断干净。\n\n水表一次只接受一个连接。",
+                go("我开着官方 App / 有同学正在用", "b_release"),
+                go("没人用，官方 App 也关着", "b_paired"),
+                go("不确定", "b_check")));
+
+        m.put("b_check", new DiagStep("排查 · 怎么确认", "先看这两个地方",
+                "① 后台还有没有官方水控 App 在跑（多任务里划掉）\n"
+                        + "② 系统蓝牙里 KLCXKJ-Water 是不是显示「已连接」\n\n"
+                        + "任意一条中了，就是被占用。",
+                go("确实被占着", "b_release"),
+                go("都没有，是干净的", "b_paired")));
+
+        m.put("b_release", new DiagStep("排查 · 让占用方退出", "先让占用方退出，再重试",
+                "① 关掉官方水控 App，后台也要划掉\n"
+                        + "② 如果是同学正在用水，等他关水退出\n"
+                        + "③ 等 10 秒再点重试 —— 水表释放连接要一点时间",
+                act("好了，重试连接", ACT_CONNECT),
+                go("还是连不上", "b_paired")));
+
+        m.put("b_paired", new DiagStep("排查 · 2 / 3", "清掉系统里的旧配对",
+                "系统蓝牙里如果还留着 KLCXKJ-Water 的配对记录，它会一直占着连接：\n\n"
+                        + "① 设置 → 蓝牙 → KLCXKJ-Water → 取消配对 / 忘记此设备\n"
+                        + "② 关掉蓝牙再打开\n"
+                        + "③ 回来重新扫描再连",
+                act("清完了，重试连接", ACT_CONNECT),
+                go("还是连不上", "b_busy")));
+
+        m.put("b_busy", new DiagStep("排查 · 3 / 3", "水表是不是正在放水 / 结算",
+                "水表在放水、刷卡、结算中时，蓝牙通道是忙的，连上也会被踢掉。\n\n"
+                        + "① 等 1 分钟，或者把水关掉再试\n"
+                        + "② 连上后如果状态是「结算中」，点开水会自动补结算，不用手动处理",
+                act("等过了，重试连接", ACT_CONNECT),
+                go("还是连不上", "b_power")));
+
+        m.put("b_power", new DiagStep("最后一招", "给水表断电重启",
+                "① 拔掉水表电池 / 关掉这一路空开，等 10 秒再上电\n"
+                        + "② 上电后 30 秒内重新扫描连接\n\n"
+                        + "断电重启还是连不上、而官方 App 能连的话，把手机型号和这块表的 MAC 发我，我按日志查。",
+                act("重启过了，重试连接", ACT_CONNECT),
+                go("官方 App 也连不上", "a_broken"),
+                act("知道了", ACT_CLOSE)));
+
+        return m;
+    }
+
+    /** 排查向导：一个弹窗里换步骤，带「返回上一步」 */
+    private void showDiagWizard(String startId) {
+        if (isFinishing() || isDestroyed()) return;
+        final Map<String, DiagStep> steps = buildDiagSteps();
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        Button ok = dialogPrimary("知道了");
-        ok.setOnClickListener(v -> {
-            tap(v);
-            dialog.dismiss();
-        });
-        box.addView(ok);
-        showStyledDialog(dialog, box, 0.9f);
+        final LinearLayout card = dialogCard();
+        final Deque<String> stack = new ArrayDeque<>();
+        final String[] cur = {startId};
+        final Runnable[] render = new Runnable[1];
+
+        render[0] = () -> {
+            DiagStep st = steps.get(cur[0]);
+            if (st == null) {
+                dialog.dismiss();
+                return;
+            }
+            card.removeAllViews();
+            card.addView(dialogLabel(st.label));
+            card.addView(dialogTitle(st.title));
+            TextView body = dialogNote(st.body);
+            body.setTextSize(12.5f);
+            body.setLineSpacing(dp(4), 1f);
+            body.setPadding(0, dp(12), 0, 0);
+            card.addView(body);
+
+            for (final DiagOption op : st.options) {
+                TextView b = diagOptionButton(op.label);
+                b.setOnClickListener(v -> {
+                    tap(v);
+                    if (op.next != null) {
+                        stack.push(cur[0]);
+                        cur[0] = op.next;
+                        render[0].run();
+                    } else {
+                        dialog.dismiss();
+                        doDiagAction(op.action);
+                    }
+                });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = dp(8);
+                card.addView(b, lp);
+            }
+
+            if (!stack.isEmpty()) {
+                TextView back = dialogGhost("返回上一步");
+                back.setOnClickListener(v -> {
+                    tap(v);
+                    if (!stack.isEmpty()) {
+                        cur[0] = stack.pop();
+                        render[0].run();
+                    }
+                });
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+                blp.topMargin = dp(6);
+                card.addView(back, blp);
+            }
+
+            TextView close = dialogGhost("关闭");
+            close.setOnClickListener(v -> {
+                tap(v);
+                dialog.dismiss();
+            });
+            card.addView(close, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+        };
+
+        render[0].run();
+        showStyledDialog(dialog, card, 0.9f);
+    }
+
+    private TextView diagOptionButton(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(12.5f);
+        v.setTextColor(getColor(R.color.primary));
+        v.setBackgroundResource(R.drawable.bg_button_ghost);
+        v.setGravity(Gravity.CENTER_VERTICAL);
+        v.setPadding(dp(14), dp(12), dp(14), dp(12));
+        v.setMinHeight(dp(44));
+        return v;
+    }
+
+    private void doDiagAction(String action) {
+        if (ACT_SCAN.equals(action)) {
+            if (btnScan != null) btnScan.performClick();
+        } else if (ACT_CONNECT.equals(action)) {
+            if (connectingItem != null) {
+                connectTo(connectingItem);
+            } else {
+                toast("先扫描，点一下自己的水表");
+            }
+        }
     }
 
     // ---- 弹窗零件：和公告 / 更新弹窗同一套圆角卡片风格 ----
@@ -1716,13 +1943,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
         if (devices.isEmpty()) {
             TextView tv = new TextView(this);
-            tv.setText("没有扫描到水表，靠近水表再试 · 点这里看排查方法");
+            tv.setText("没扫到水表 · 点这里一步步排查（信号弱 / 蓝牙没开 / 设备故障）");
             tv.setTextSize(12);
             tv.setTextColor(getColor(R.color.muted));
             tv.setPadding(dp(8), dp(10), dp(8), dp(6));
             tv.setOnClickListener(v -> {
                 tap(v);
-                showTroubleshoot();
+                showDiagWizard("a1");
             });
             deviceList.addView(tv);
         }
