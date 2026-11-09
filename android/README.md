@@ -1,6 +1,15 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.2）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.3）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.3 日志不再抢页面（2026-11-10）
+
+结算时一秒几十行日志，原来每行都 `setText` + `fullScroll(FOCUS_DOWN)`，日志卡片一展开整页就被往下拽。
+
+- `appendLog()` 只往 `logBuf` 里攒；卡片收起时**完全不碰界面**，展开时按 250ms 合并成一次 `flushLog()`
+- `flushLog()` 先记下外层 `scroll` 的 `scrollY`，刷完再放回去，日志重排带不动整页
+- 给 `logScroll` 挂了滚动监听维护 `logStickBottom`：只有本来就贴着底部才自动跟到底，往上翻看不会被拽回去
+- 展开日志时把 `logStickBottom` 复位为 true 并立刻刷一次，不用等下一批
 
 ## 0.12.2 计费自检修「假测」（2026-11-10）
 
@@ -253,7 +262,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.2（versionCode 62），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.3（versionCode 63），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
