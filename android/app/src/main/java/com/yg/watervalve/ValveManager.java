@@ -99,6 +99,8 @@ public final class ValveManager {
     private Runnable recoveryRetryRunnable;
     private static final int MAX_RECONNECT = 20;
     private static final int MAX_RECOVERY_RETRY = 3;
+    /** 水表不报流量时的估算出水速度（升/分钟），宿舍水龙头量级 */
+    private static final double FLOW_LPM = 8.0;
     private String lastRn = "";
     private String lastRnPre = "";
     private String lastCm = "";
@@ -678,6 +680,15 @@ public final class ValveManager {
         return false;
     }
 
+    /**
+     * 记一笔用量。
+     *
+     * 关键事实（用 Windows 版真实账本核对过）：水表 85 流水里的 useCount 是「次数」不是流量 ——
+     * 实测 5 秒和 606 秒两笔，设备计数都是 2、云端下单 useCount 都是 1，差值恒为 1。
+     * 所以按差值 × 系数算，永远显示 1.000 L。
+     *
+     * 现在：差值 >= 2 才当真实计数增量（1 计数 = 1 升）；否则按出水时长估算并标「约」。
+     */
     private void recordSession(long start) {
         if (lastFlow == null || !lastFlow.ok) {
             log("账本：本次没取到流水，不记账");
@@ -686,26 +697,28 @@ public final class ValveManager {
         long end = System.currentTimeMillis();
         int seconds = (int) Math.max(0, (end - start) / 1000);
         int count = lastFlow.useCountI;
+        int cloudCount = lastOrderUseCount;
         int rate = lastFlow.rate2I > 0 ? lastFlow.rate2I : lastFlow.rate1I;
         if (rate <= 0) rate = lastRateOrder;
 
-        // 本次用量 = 设备计数 − 下单时云端 useCount（跟 PC 版同一套口径）。
-        // 只拿设备累计计数会把历史用量重复算进来，看起来就像「每次固定 1 升」。
-        int delta = count;
+        int delta = (cloudCount >= 0 && count >= cloudCount) ? count - cloudCount : -1;
+        double liters;
+        boolean estimated;
         String basis;
-        boolean estimated = false;
-        if (lastOrderUseCount >= 0 && count >= lastOrderUseCount) {
-            delta = count - lastOrderUseCount;
-            basis = "设备计数 − 云端 useCount";
-        } else {
-            basis = "设备计数（无云端对照）";
-        }
-        double liters = Math.max(0.0, delta * 0.5);
-        if (liters <= 0 && seconds > 0) {
-            liters = seconds / 60.0 * 12.0;      // 计数拿不到时按 12 L/min 估算
+        if (delta >= 2) {
+            liters = delta;
+            estimated = false;
+            basis = "设备计数增量（" + count + " − " + cloudCount + "）";
+        } else if (seconds > 0) {
+            liters = seconds / 60.0 * FLOW_LPM;
             estimated = true;
-            basis = "按 " + seconds + " 秒 × 12 L/min 估算";
+            basis = "按 " + seconds + " 秒 × " + FLOW_LPM + " L/min 估算（水表只报次数，不报流量）";
+        } else {
+            liters = 0;
+            estimated = true;
+            basis = "时长太短，记为 0";
         }
+        liters = Math.max(0.0, liters);
         double byUse = liters * rate / 1000.0;
         double charge = Math.max(byUse, 0.025);
         try {
@@ -714,7 +727,7 @@ public final class ValveManager {
             rec.put("start", start);
             rec.put("seconds", seconds);
             rec.put("count", count);
-            rec.put("cloud_count", lastOrderUseCount);
+            rec.put("cloud_count", cloudCount);
             rec.put("delta", delta);
             rec.put("estimated", estimated);
             rec.put("basis", basis);
@@ -729,11 +742,11 @@ public final class ValveManager {
             while (arr.length() > 200) arr.remove(0);
             prefs.edit().putString("ledger", arr.toString())
                     .putInt("order_use_count", -1).apply();
-            lastOrderUseCount = -1;      // 这一单已经结掉，别带到下一单
             log(String.format(Locale.CHINA,
-                    "账本：计数 %d（云端 %d）→ %s%.3f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥0 · 省 ¥%.3f",
-                    count, lastOrderUseCount, estimated ? "约 " : "",
-                    liters, seconds, rate, charge, charge));
+                    "账本：计数 %d（云端 %s）差值 %d → %s%.2f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥0 · 省 ¥%.3f",
+                    count, cloudCount < 0 ? "无" : String.valueOf(cloudCount), delta,
+                    estimated ? "约 " : "", liters, seconds, rate, charge, charge));
+            lastOrderUseCount = -1;      // 这一单已经结掉，别带到下一单
             notifyStats();
         } catch (Exception e) {
             log("账本记录失败：" + msg(e));

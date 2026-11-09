@@ -649,14 +649,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
         TextView version = v.findViewById(R.id.dialogVersion);
         TextView meta = v.findViewById(R.id.dialogMeta);
-        TextView notesView = v.findViewById(R.id.dialogNotes);
+        LinearLayout notesList = v.findViewById(R.id.dialogNotesList);
         ScrollView notesScroll = v.findViewById(R.id.dialogNotesScroll);
         Button install = v.findViewById(R.id.dialogInstall);
         TextView later = v.findViewById(R.id.dialogLater);
 
         version.setText("v" + Updater.currentVersion(this));
         meta.setText("已是最新版本");
-        notesView.setText("当前版本已是最新。");
+        fillNotes(notesList, "当前版本已是最新。");
         install.setVisibility(View.GONE);
         later.setText("关闭");
 
@@ -666,7 +666,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         dialog.setCanceledOnTouchOutside(true);
         later.setOnClickListener(x -> dialog.dismiss());
         dialog.show();
-        capNotesHeight(notesScroll, notesView);
+        capNotesHeight(notesScroll, notesList);
         Window dw = dialog.getWindow();
         if (dw != null) {
             dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -693,7 +693,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
         TextView version = v.findViewById(R.id.dialogVersion);
         TextView meta = v.findViewById(R.id.dialogMeta);
-        TextView notesView = v.findViewById(R.id.dialogNotes);
+        LinearLayout notesList = v.findViewById(R.id.dialogNotesList);
         ScrollView notesScroll = v.findViewById(R.id.dialogNotesScroll);
         Button install = v.findViewById(R.id.dialogInstall);
         TextView later = v.findViewById(R.id.dialogLater);
@@ -701,7 +701,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         version.setText("v" + info.version);
         meta.setText(mb(info.size) + " · 当前 v" + Updater.currentVersion(this));
         String notes = info.notes == null ? "" : info.notes.trim();
-        notesView.setText(notes.isEmpty() ? "包含界面与稳定性更新。" : notes);
+        fillNotes(notesList, notes.isEmpty() ? "包含界面与稳定性更新。" : notes);
 
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -718,7 +718,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         later.setOnClickListener(x -> dialog.dismiss());
         dialog.show();
-        capNotesHeight(notesScroll, notesView);
+        capNotesHeight(notesScroll, notesList);
         Window dw = dialog.getWindow();
         if (dw != null) {
             dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -812,6 +812,41 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
     }
 
+    /**
+     * 更新说明按条目渲染：一行一条、带圆点，二级条目缩进换色，长文本自动换行。
+     * 以前是一整块文字，条目挤在一起，读起来很累。
+     */
+    private void fillNotes(LinearLayout list, String notes) {
+        if (list == null) return;
+        list.removeAllViews();
+        boolean first = true;
+        for (String raw : notes.replace("\r", "").split("\n")) {
+            String t = raw.trim();
+            if (t.isEmpty()) continue;
+            boolean sub = raw.startsWith("  ") || raw.startsWith("\t");
+            String text = t.replaceFirst("^[•·\\-*+]\\s*", "");
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(sub ? dp(18) : 0, first ? 0 : dp(8), 0, 0);
+            TextView dot = new TextView(this);
+            dot.setText(sub ? "·" : "•");
+            dot.setTextSize(sub ? 15 : 12);
+            dot.setTextColor(getColor(sub ? R.color.muted : R.color.primary));
+            dot.setLayoutParams(new LinearLayout.LayoutParams(
+                    dp(14), LinearLayout.LayoutParams.WRAP_CONTENT));
+            row.addView(dot);
+            TextView tv = new TextView(this);
+            tv.setText(text);
+            tv.setTextSize(sub ? 12f : 13f);
+            tv.setTextColor(getColor(sub ? R.color.muted : R.color.ink));
+            tv.setLineSpacing(dp(3), 1f);
+            row.addView(tv, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            list.addView(row);
+            first = false;
+        }
+    }
+
     private String mb(long bytes) {
         return String.format(Locale.CHINA, "%.1f MB", bytes / 1048576.0);
     }
@@ -820,7 +855,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
      * 更新说明最多占屏幕 40%，超了就在框里滚动 ——
      * 以前是 maxLines=7 + 省略号，条目一多就看不全。
      */
-    private void capNotesHeight(final ScrollView scroll, final TextView notes) {
+    private void capNotesHeight(final ScrollView scroll, final View notes) {
         if (scroll == null || notes == null) return;
         final int max = (int) (getResources().getDisplayMetrics().heightPixels * 0.40f);
         scroll.post(() -> {
