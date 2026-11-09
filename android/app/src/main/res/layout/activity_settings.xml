@@ -63,6 +63,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/cardAppearance"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
@@ -155,6 +156,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/cardExperiment"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
@@ -262,6 +264,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/cardDebug"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
@@ -386,6 +389,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/cardAbout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"

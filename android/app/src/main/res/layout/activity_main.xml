@@ -458,6 +458,7 @@
                         android:textSize="11sp" />
 
                     <TextView
+                        android:id="@+id/zeroBadge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:background="@drawable/bg_badge_green"
@@ -771,6 +772,7 @@
                 android:textSize="13sp" />
 
             <LinearLayout
+                android:id="@+id/gateCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"

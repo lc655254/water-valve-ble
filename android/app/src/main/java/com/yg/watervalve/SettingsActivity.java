@@ -149,11 +149,10 @@ public class SettingsActivity extends Activity {
             clear.setOnClickListener(v -> {
                 DebugLog.op("清除自定义背景图");
                 Appearance.clearBgImage(this);
-                // 背景图是主界面启动时贴上去的，清掉之后已经开着的界面还留着旧图，
-                // 所以要明确提示重启；顺手给一个「立即重启」按钮。
+                // 现在返回主界面就会重新贴背景，一般不用重启；留一句兜底说明
                 confirm("背景图已清除",
-                        "需要重启软件才会恢复默认背景：从后台划掉本应用再打开，或者点下面的「立即重启」。",
-                        "立即重启", this::restartApp, this::recreate);
+                        "返回主界面就会恢复默认底色，不用重启。如果哪一页还留着旧图，重新进一次设置或重启软件即可。",
+                        "知道了", null, this::recreate);
             });
         }
         View customBtn = findViewById(R.id.btnCustomColor);
@@ -535,6 +534,8 @@ public class SettingsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         FullScreen.hideBars(this);
+        // 换完主题/背景图立刻生效（取消对话框、返回本页都能看到）
+        Appearance.apply(this);
     }
 
     @Override

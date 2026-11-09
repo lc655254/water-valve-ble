@@ -148,12 +148,82 @@ public final class Appearance {
         return new RippleDrawable(ColorStateList.valueOf(withAlpha(primary, 0.18f)), g, null);
     }
 
+    /** 卡片：白底里掺一点主色，边框也跟着主色走，换主题时不会「一张白纸配橙字」 */
     public static Drawable cardBg(Context c) {
+        int p = primary(c);
+        boolean dark = isDark(c);
+        int surface = dark ? mix(0xFF11161F, p, 0.06f) : mix(0xFFFFFFFF, p, 0.025f);
+        int stroke = dark ? mix(0xFF1E2635, p, 0.24f) : mix(0xFFE4E9F2, p, 0.22f);
         GradientDrawable g = new GradientDrawable();
-        g.setColor(c.getColor(R.color.card));
+        g.setColor(surface);
         g.setCornerRadius(dp(c, 24));
-        g.setStroke(dp(c, 1), c.getColor(R.color.outline));
+        g.setStroke(dp(c, 1), stroke);
         return g;
+    }
+
+    /** 底部操作栏：从页面底色微微透出，向上有一点点渐变 */
+    public static Drawable bottomBarBg(Context c) {
+        int p = primary(c);
+        boolean dark = isDark(c);
+        int base = dark ? mix(0xFF0B0F16, p, 0.05f) : mix(0xFFF5F8FC, p, 0.04f);
+        return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{withAlpha(base, 0.92f), base});
+    }
+
+    /** 小药丸：状态标签、错误横幅、徽标都用它，底色是主色/语义色的淡淡一层 */
+    public static Drawable chipBg(Context c, int color) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(withAlpha(color, isDark(c) ? 0.24f : 0.13f));
+        g.setCornerRadius(dp(c, 999));
+        return g;
+    }
+
+    /** 输入框：底色跟卡片一致，边框带主色 */
+    public static Drawable inputBg(Context c) {
+        int p = primary(c);
+        boolean dark = isDark(c);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(dark ? mix(0xFF0E131B, p, 0.05f) : mix(0xFFF7F9FD, p, 0.02f));
+        g.setCornerRadius(dp(c, 14));
+        g.setStroke(dp(c, 1), dark ? mix(0xFF232C3C, p, 0.22f) : mix(0xFFE1E7F0, p, 0.20f));
+        return g;
+    }
+
+    /** 幽灵按钮：透明底 + 主色描边 */
+    public static Drawable ghostBg(Context c) {
+        int p = primary(c);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(withAlpha(p, isDark(c) ? 0.10f : 0.05f));
+        g.setCornerRadius(dp(c, 999));
+        g.setStroke(dp(c, 1), withAlpha(p, isDark(c) ? 0.34f : 0.22f));
+        return new RippleDrawable(ColorStateList.valueOf(withAlpha(p, 0.14f)), g, null);
+    }
+
+    /** 日志区：比卡片更深一点，像终端 */
+    public static Drawable logBg(Context c) {
+        int p = primary(c);
+        boolean dark = isDark(c);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(dark ? mix(0xFF080C12, p, 0.04f) : mix(0xFFF3F6FB, p, 0.03f));
+        g.setCornerRadius(dp(c, 16));
+        g.setStroke(dp(c, 1), dark ? mix(0xFF1B2331, p, 0.18f) : mix(0xFFE6EBF3, p, 0.16f));
+        return g;
+    }
+
+    /** 公告条：主色淡淡一层 + 主色描边 */
+    public static Drawable noticeBg(Context c) {
+        int p = primary(c);
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{withAlpha(p, isDark(c) ? 0.20f : 0.10f),
+                        withAlpha(p, isDark(c) ? 0.10f : 0.04f)});
+        g.setCornerRadius(dp(c, 18));
+        g.setStroke(dp(c, 1), withAlpha(p, isDark(c) ? 0.30f : 0.18f));
+        return g;
+    }
+
+    /** 语义色跟着主色偏一点点，避免「橙主题配荧光绿」 */
+    public static int harmonize(int color, int primary, float t) {
+        return mix(color, primary, t);
     }
 
     /** 页面底色：跟着主色轻微染色，但不抢内容 */
@@ -184,6 +254,8 @@ public final class Appearance {
         if (a == null) return;
         final int p = primary(a);
         final boolean dark = isDark(a);
+        final int success = harmonize(a.getColor(R.color.success), p, 0.12f);
+        final int danger = harmonize(a.getColor(R.color.danger), p, 0.10f);
 
         View root = a.findViewById(R.id.root);
         ImageView img = a.findViewById(R.id.bgImage);
@@ -200,18 +272,13 @@ public final class Appearance {
         }
         if (img != null && scrim != null) {
             if (!bg.isEmpty()) {
-                try {
-                    Bitmap bm = decodeSampled(bg, 1600);
-                    if (bm != null) {
-                        img.setImageBitmap(bm);
-                        img.setVisibility(View.VISIBLE);
-                        scrim.setBackgroundColor(scrimColor(a));
-                        scrim.setVisibility(View.VISIBLE);
-                    } else {
-                        img.setVisibility(View.GONE);
-                        scrim.setVisibility(View.GONE);
-                    }
-                } catch (Exception e) {
+                Bitmap bm = bgBitmap(bg);
+                if (bm != null) {
+                    img.setImageBitmap(bm);
+                    img.setVisibility(View.VISIBLE);
+                    scrim.setBackgroundColor(scrimColor(a));
+                    scrim.setVisibility(View.VISIBLE);
+                } else {
                     img.setVisibility(View.GONE);
                     scrim.setVisibility(View.GONE);
                 }
@@ -222,7 +289,43 @@ public final class Appearance {
             }
         }
 
-        // 主按钮（关水是红色，由 MainActivity 自己切换，这里只管开水的常态）
+        // ── 面：卡片、底栏、日志区、输入框、药丸 ──────────────
+        int[] cards = {R.id.accountCard, R.id.deviceCard, R.id.statsCard, R.id.logCard,
+                R.id.gateCard, R.id.cardAppearance, R.id.cardExperiment,
+                R.id.cardDebug, R.id.cardAbout};
+        for (int id : cards) {
+            View v = a.findViewById(id);
+            if (v != null) v.setBackground(cardBg(a));
+        }
+        View bottom = a.findViewById(R.id.bottomBar);
+        if (bottom != null) bottom.setBackground(bottomBarBg(a));
+        View logBox = a.findViewById(R.id.logScroll);
+        if (logBox != null) logBox.setBackground(logBg(a));
+        int[] inputs = {R.id.phone, R.id.code, R.id.gatePhone, R.id.gateCode};
+        for (int id : inputs) {
+            View v = a.findViewById(id);
+            if (v != null) v.setBackground(inputBg(a));
+        }
+        int[] ghosts = {R.id.btnQuery, R.id.btnCopyLog, R.id.btnToggleLogin,
+                R.id.btnToggleLog, R.id.scanHint};
+        for (int id : ghosts) {
+            View v = a.findViewById(id);
+            if (v != null) v.setBackground(ghostBg(a));
+        }
+        View chip = a.findViewById(R.id.headerStatus);
+        if (chip != null) chip.setBackground(chipBg(a, p));
+        View gear = a.findViewById(R.id.btnSettings);
+        if (gear != null) gear.setBackground(chipBg(a, p));
+        View gate = a.findViewById(R.id.loginGate);
+        if (gate != null) gate.setBackground(pageBg(a));
+        View notice = a.findViewById(R.id.noticeBar);
+        if (notice != null) notice.setBackground(noticeBg(a));
+        View banner = a.findViewById(R.id.banner);
+        if (banner != null) banner.setBackground(chipBg(a, danger));
+        View badge = a.findViewById(R.id.zeroBadge);
+        if (badge != null) badge.setBackground(chipBg(a, success));
+
+        // ── 主按钮 ────────────────────────────────────────
         Button water = a.findViewById(R.id.btnWater);
         if (water != null) {
             String t = water.getText() == null ? "" : water.getText().toString();
@@ -236,7 +339,7 @@ public final class Appearance {
         }
 
         // 次要按钮（tonal）
-        int[] tonals = {R.id.btnScan, R.id.btnQuery, R.id.btnSendCode, R.id.gateSend};
+        int[] tonals = {R.id.btnScan, R.id.btnSendCode, R.id.gateSend};
         for (int id : tonals) {
             View v = a.findViewById(id);
             if (v != null) v.setBackground(tonal(a, p));
@@ -256,6 +359,53 @@ public final class Appearance {
         if (mark != null) mark.setBackground(pill(a, lift(p, 0.18f), mix(p, 0xFF000000, 0.10f)));
         ImageView deco = a.findViewById(R.id.heroDeco);
         if (deco != null) deco.setColorFilter(p);
+
+        // 布局里写死的主题色（蓝/绿/红）统一换成当前配色，换主题不留旧颜色
+        View decor = a.getWindow() == null ? null : a.getWindow().getDecorView();
+        if (decor != null) retint(decor, a, p, success, danger);
+    }
+
+    /**
+     * 递归把「布局里写死的主题色」换成当前主题色：
+     * primary → 当前主色，success / danger → 跟主色协调过的语义色。
+     */
+    private static void retint(View v, Activity a, int p, int success, int danger) {
+        if (v == null) return;
+        if (v instanceof TextView) {
+            TextView t = (TextView) v;
+            int c = t.getCurrentTextColor();
+            if (c == a.getColor(R.color.primary)) {
+                t.setTextColor(p);
+            } else if (c == a.getColor(R.color.success)) {
+                t.setTextColor(success);
+            } else if (c == a.getColor(R.color.danger)) {
+                t.setTextColor(danger);
+            }
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                retint(g.getChildAt(i), a, p, success, danger);
+            }
+        }
+    }
+
+    // 背景图解码缓存：每次回到前台都重新解码 1600px 的图会卡一下
+    private static String bgCachePath = "";
+    private static long bgCacheStamp;
+    private static Bitmap bgCache;
+
+    private static Bitmap bgBitmap(String path) {
+        File f = new File(path);
+        long stamp = f.lastModified() ^ f.length();
+        if (bgCache != null && path.equals(bgCachePath) && stamp == bgCacheStamp) return bgCache;
+        Bitmap bm = decodeSampled(path, 1600);
+        if (bm != null) {
+            bgCachePath = path;
+            bgCacheStamp = stamp;
+            bgCache = bm;
+        }
+        return bm;
     }
 
     /** 按最长边采样解码，避免大图直接把内存撑爆 */
