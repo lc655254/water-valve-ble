@@ -258,13 +258,31 @@ public class SettingsActivity extends Activity {
     }
 
     private void pickBackground() {
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("image/*");
+        Intent intent = null;
+        // Android 13+ 用系统相册选择器（Photo Picker），比文件管理器好找图
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            intent = new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES);
+            intent.setType("image/*");
+            if (intent.resolveActivity(getPackageManager()) == null) intent = null;
+        }
+        // 老系统先试相册（MediaStore），不行再退回文件选择器
+        if (intent == null) {
+            Intent pick = new Intent(Intent.ACTION_PICK,
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+            pick.setType("image/*");
+            pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (pick.resolveActivity(getPackageManager()) != null) intent = pick;
+        }
+        if (intent == null) {
+            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("image/*");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
         try {
-            startActivityForResult(i, REQ_PICK_BG);
+            startActivityForResult(intent, REQ_PICK_BG);
         } catch (Exception e) {
-            toast("没有可用的文件选择器");
+            toast("打不开相册，换台设备或先用文件管理器选图");
         }
     }
 
