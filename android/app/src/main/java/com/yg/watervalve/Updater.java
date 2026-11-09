@@ -447,8 +447,9 @@ public final class Updater {
 
     private static String fetchText(String url) throws Exception {
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(20000);
+        // 手机网络下 github api 偶尔很慢：宁可早点失败让用户重试，也别一直转圈
+        c.setConnectTimeout(6000);
+        c.setReadTimeout(9000);
         c.setRequestProperty("User-Agent", "WaterValve-Android");
         c.setRequestProperty("Accept", "application/vnd.github+json");
         int code = c.getResponseCode();
