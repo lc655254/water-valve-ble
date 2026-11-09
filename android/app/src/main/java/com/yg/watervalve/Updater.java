@@ -282,8 +282,10 @@ public final class Updater {
                 continue;
             }
             if (cur == null || t.isEmpty() || t.startsWith("```")) continue;
-            if (cur.length() > 700) continue;
-            cur.append(t.replaceFirst("^[-*+]\\s*", "• ")).append('\n');
+            if (cur.length() > 900) continue;
+            // 缩进的二级条目保留层级，别和一级条目挤成一样
+            boolean sub = raw.startsWith("  ") || raw.startsWith("\t");
+            cur.append(t.replaceFirst("^[-*+]\\s*", sub ? "     · " : "• ")).append('\n');
         }
         String s = best == null ? "" : best.toString().trim();
         if (!s.isEmpty()) return s;

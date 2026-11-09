@@ -635,6 +635,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         TextView version = v.findViewById(R.id.dialogVersion);
         TextView meta = v.findViewById(R.id.dialogMeta);
         TextView notesView = v.findViewById(R.id.dialogNotes);
+        ScrollView notesScroll = v.findViewById(R.id.dialogNotesScroll);
         Button install = v.findViewById(R.id.dialogInstall);
         TextView later = v.findViewById(R.id.dialogLater);
 
@@ -650,6 +651,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         dialog.setCanceledOnTouchOutside(true);
         later.setOnClickListener(x -> dialog.dismiss());
         dialog.show();
+        capNotesHeight(notesScroll, notesView);
         Window dw = dialog.getWindow();
         if (dw != null) {
             dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -677,6 +679,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         TextView version = v.findViewById(R.id.dialogVersion);
         TextView meta = v.findViewById(R.id.dialogMeta);
         TextView notesView = v.findViewById(R.id.dialogNotes);
+        ScrollView notesScroll = v.findViewById(R.id.dialogNotesScroll);
         Button install = v.findViewById(R.id.dialogInstall);
         TextView later = v.findViewById(R.id.dialogLater);
 
@@ -700,6 +703,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         later.setOnClickListener(x -> dialog.dismiss());
         dialog.show();
+        capNotesHeight(notesScroll, notesView);
         Window dw = dialog.getWindow();
         if (dw != null) {
             dw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -795,6 +799,31 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private String mb(long bytes) {
         return String.format(Locale.CHINA, "%.1f MB", bytes / 1048576.0);
+    }
+
+    /**
+     * 更新说明最多占屏幕 40%，超了就在框里滚动 ——
+     * 以前是 maxLines=7 + 省略号，条目一多就看不全。
+     */
+    private void capNotesHeight(final ScrollView scroll, final TextView notes) {
+        if (scroll == null || notes == null) return;
+        final int max = (int) (getResources().getDisplayMetrics().heightPixels * 0.40f);
+        scroll.post(() -> {
+            int w = notes.getWidth();
+            if (w <= 0) {
+                w = getResources().getDisplayMetrics().widthPixels - dp(48) - dp(28);
+            }
+            notes.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int want = notes.getMeasuredHeight() + notes.getPaddingTop() + notes.getPaddingBottom();
+            int h = Math.min(want, max);
+            ViewGroup.LayoutParams lp = scroll.getLayoutParams();
+            if (lp.height != h) {
+                lp.height = h;
+                scroll.setLayoutParams(lp);
+            }
+            scroll.setVerticalScrollBarEnabled(want > max);
+        });
     }
 
     private void setupWindow() {

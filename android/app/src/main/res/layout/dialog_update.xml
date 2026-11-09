@@ -34,18 +34,23 @@
         android:textColor="@color/muted"
         android:textSize="12sp" />
 
-    <TextView
-        android:id="@+id/dialogNotes"
+    <ScrollView
+        android:id="@+id/dialogNotesScroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="18dp"
         android:background="@drawable/bg_dialog_notes"
-        android:ellipsize="end"
-        android:lineSpacingExtra="4dp"
-        android:maxLines="7"
-        android:padding="14dp"
-        android:textColor="@color/ink"
-        android:textSize="13sp" />
+        android:scrollbars="none">
+
+        <TextView
+            android:id="@+id/dialogNotes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingExtra="5dp"
+            android:padding="14dp"
+            android:textColor="@color/ink"
+            android:textSize="13sp" />
+    </ScrollView>
 
     <Button
         android:id="@+id/dialogInstall"
