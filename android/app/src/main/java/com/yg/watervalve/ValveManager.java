@@ -103,6 +103,8 @@ public final class ValveManager {
     private static final double FLOW_LPM = 8.0;
     /** 官方起步价（元/次）：实测「开了立马关」也固定扣 0.025，和 Windows 版同一口径 */
     private static final double MIN_CHARGE_YUAN = 0.025;
+    /** 起步价换成厘：rate1 只有 25 时说明设备报的是最低收费，不是真实用量 */
+    private static final int MIN_CHARGE_LI = 25;
     private String lastRn = "";
     private String lastRnPre = "";
     private String lastCm = "";
@@ -567,7 +569,6 @@ public final class ValveManager {
         log("拿到 downData，费率 rate=" + ro.rate + " 厘");
         DebugLog.line("order", "下单返回 rate=" + ro.rate + " useCount=" + ro.useCount
                 + " downData=" + ro.downData + " raw=" + ro.raw);
-        logSnapshot("下单后");
         logBalanceNow("下单后");
 
         // 发 21 之前先落安全日志并拉起前台服务：即使下一秒进程被杀，也能恢复关阀。
@@ -576,6 +577,7 @@ public final class ValveManager {
         lastRateOrder = ro.rate;
         lastOrderUseCount = ro.useCount;
         prefs.edit().putInt("order_use_count", ro.useCount).apply();
+        logSnapshot("下单后");
         lastRnPre = q.tacTimes;
         lastRn = q.tacTimes;
         lastCm = q.commMode;
@@ -854,8 +856,10 @@ public final class ValveManager {
 
         int delta = (cloudCount >= 0 && count >= cloudCount) ? count - cloudCount : -1;
         // 设备自己算的钱（rate1，厘）÷ 单价（rate2，元/吨）= 这一单的水量（升）。
-        // 官方按用量计费，这个数就是水表自己的计量结果，比按秒数估算准。
-        double deviceLiters = (lastFlow.rate1I > 0 && lastFlow.rate2I > 0)
+        // 但 rate1 等于起步价（25 厘 = 0.025 元）时，那只是「最低收费」，不是真实用量，
+        // 这种情况按流速估算，别把 1.00 L 当成实测。
+        boolean aboveMin = lastFlow.rate1I > MIN_CHARGE_LI;
+        double deviceLiters = (aboveMin && lastFlow.rate2I > 0)
                 ? (double) lastFlow.rate1I / lastFlow.rate2I : 0;
         double liters;
         boolean estimated;
@@ -865,7 +869,13 @@ public final class ValveManager {
             estimated = false;
             basis = "设备计量：rate1 " + lastFlow.rate1I + " ÷ 单价 " + lastFlow.rate2I
                     + " = " + String.format(Locale.CHINA, "%.2f", liters) + " L";
-            calibrateFlow(liters, seconds);
+            if (seconds >= 45) calibrateFlow(liters, seconds);
+        } else if (lastFlow.rate1I > 0 && lastFlow.rate1I <= MIN_CHARGE_LI && seconds > 0) {
+            double lpm = flowLpm();
+            liters = seconds / 60.0 * lpm;
+            estimated = true;
+            basis = "设备只报了起步价 " + lastFlow.rate1I + " 厘（1 L 以内），按 "
+                    + String.format(Locale.CHINA, "%.2f", lpm) + " L/min 估算";
         } else if (delta >= 2) {
             liters = delta;
             estimated = false;
