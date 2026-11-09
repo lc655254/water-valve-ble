@@ -237,6 +237,12 @@ public class SettingsActivity extends Activity {
         View export = findViewById(R.id.btnExportLog);
         if (export != null) export.setOnClickListener(v -> exportLog());
 
+        View share = findViewById(R.id.btnShareLog);
+        if (share != null) share.setOnClickListener(v -> {
+            DebugLog.op("分享日志");
+            LogShare.share(this);
+        });
+
         View copy = findViewById(R.id.btnCopyLog);
         if (copy != null) copy.setOnClickListener(v -> {
             String text = DebugLog.recentText();

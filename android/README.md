@@ -1,6 +1,18 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.6）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.7）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.7 日志一键分享（2026-11-10）
+
+以前只能「导出成文件」，还得自己去文件夹翻。现在：
+
+- `DebugLog.writeShareFile()` 把整份日志写到 `files/share/logs-时间.txt`（只留最近 5 份）
+- `LogProvider`（`content://com.yg.watervalve.logs/…`）把文件暴露给系统分享面板，
+  绕开 API 24+ 的 `file://` 限制；`LogShare` 用 `ACTION_SEND` + `ClipData` 把读权限授给微信/QQ
+- 入口两处：主界面日志卡片右上角「分享」、设置 → 调试「分享到微信/QQ」
+- 崩溃时 `DebugLog` 的 uncaught handler 自动打包一份并写 `pending_share`，
+  下次启动弹「上次异常退出，要分享日志吗」，点一下直接发
+- 日志卡片的「复制」「收起」从 `Appearance` 的 ghosts 列表里摘掉，不再套胶囊底
 
 ## 0.12.6 起步价不当成用水量（2026-11-10）
 
@@ -294,7 +306,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.6（versionCode 66），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.7（versionCode 67），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

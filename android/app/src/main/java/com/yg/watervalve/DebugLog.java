@@ -109,10 +109,47 @@ public final class DebugLog {
             try {
                 line("crash", "线程 " + t.getName() + " 崩溃：" + Log.getStackTraceString(e));
                 flushSync();
+                // 顺手把整份日志打包到可分享目录，下次打开 App 一键发出去
+                String name = writeShareFile("crash");
+                if (!name.isEmpty()) {
+                    prefs().edit().putString("pending_share", name).apply();
+                }
             } catch (Throwable ignored) {
             }
             if (prev != null) prev.uncaughtException(t, e);
         });
+    }
+
+    /**
+     * 把当前全部日志写成 files/share/&lt;prefix&gt;-时间.txt，返回文件名。
+     * 失败返回空串。分享走 LogProvider 的 content:// URI。
+     */
+    public static String writeShareFile(String prefix) {
+        try {
+            if (app == null) return "";
+            String name = (prefix == null || prefix.isEmpty() ? "logs" : prefix) + "-"
+                    + new SimpleDateFormat("yyyyMMdd-HHmm", Locale.CHINA).format(new Date()) + ".txt";
+            File dir = new File(app.getFilesDir(), "share");
+            if (!dir.exists()) dir.mkdirs();
+            File out = new File(dir, name);
+            byte[] bytes = bundle(app).getBytes(StandardCharsets.UTF_8);
+            try (FileOutputStream os = new FileOutputStream(out)) {
+                os.write(bytes);
+            }
+            // 只留最近 5 份，别把手机塞满
+            File[] olds = dir.listFiles();
+            if (olds != null && olds.length > 5) {
+                Arrays.sort(olds, Comparator.comparingLong(File::lastModified));
+                for (int i = 0; i < olds.length - 5; i++) {
+                    //noinspection ResultOfMethodCallIgnored
+                    olds[i].delete();
+                }
+            }
+            DebugLog.line("share", "已打包日志：" + name + "（" + bytes.length + "B）");
+            return name;
+        } catch (Throwable e) {
+            return "";
+        }
     }
 
     // ── 写日志 ──────────────────────────────────────────────
