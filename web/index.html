@@ -510,6 +510,15 @@ summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-
 *::-webkit-scrollbar-track{background:transparent}
 *::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
 *::-webkit-scrollbar-thumb:hover{background:var(--muted-2)}
+
+/* 蓝牙没开提示条：默认隐藏，paintState 里按状态显示 */
+.btbanner{display:none;align-items:center;gap:8px;margin:10px 16px 0;padding:8px 12px;
+  font-size:12.5px;color:var(--text);border-radius:var(--radius-xs);
+  background:color-mix(in srgb,var(--danger) 10%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--danger) 32%,var(--border))}
+.btbanner.show{display:flex}
+.btbanner span{flex:1;min-width:0}
+.btbanner svg{color:var(--danger);flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -570,6 +579,17 @@ summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
          stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
   </button>
+</div>
+
+<!-- 电脑蓝牙没开时的提示条 -->
+<div class="btbanner" id="btBanner">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto">
+    <path d="m7 7 10 10-5 5V2l5 5L7 17"/>
+  </svg>
+  <span id="btBannerText">电脑蓝牙没开，连水表前需要先打开</span>
+  <button class="btn tiny primary" id="btOn">打开蓝牙</button>
+  <button class="btn tiny" id="btSet">蓝牙设置</button>
 </div>
 
 <!-- 状态 -->
@@ -1112,8 +1132,12 @@ function paintState(s){
           logNote("✓ " + name + " 完成 · 已连上水表", "ok");
         } else {
           toast("⚠ " + name + " 结束 · 还没连上水表", "warn", 4200);
-          logNote("⚠ " + name + " 结束 · 还没连上水表（水表广播稀疏/信号弱），"
-                  + "可点「搜寻水表」或靠近水表后重试", "warn");
+          if (s.bt_off){
+            logNote("⚠ " + name + " 结束 · 电脑蓝牙没开，先点上面的「打开蓝牙」，再点「搜寻水表」", "warn");
+          } else {
+            logNote("⚠ " + name + " 结束 · 还没连上水表（水表广播稀疏/信号弱），"
+                    + "可点「搜寻水表」或靠近水表后重试", "warn");
+          }
         }
       } else if (!islandKind().includes("err")){
         toast("✓ " + name + " 完成", "ok", 3200);
@@ -1126,6 +1150,7 @@ function paintState(s){
   state.waterRunning = (s.water_running === true) ? true : (s.water_running === false ? false : null);
   state.busyLabel = s.busy ? (s.busy_label || "") : "";
   paintWater(s);
+  paintBt(s);
   if (!islandShowing()) islandIdle();      // 没在播报提示时，胶囊显示当前状态
   ["btnQuery","btnScan","btnSwitch","btnAdd","btnRelogin","btnDel",
    "btnInfo","btnBill"].forEach(id => { $(id).disabled = state.busy; });
@@ -1162,6 +1187,37 @@ document.addEventListener("click", e => {
   if (!$("acctBox").contains(e.target)) acctClose();
 });
 async function refresh(){ const s = await api("/api/state"); if (s && s.ok) paintState(s); }
+
+/* 蓝牙没开：顶部提示条 + 一键打开 */
+function paintBt(s){
+  const bar = $("btBanner");
+  if (!bar) return;
+  const off = !!s.bt_off;
+  bar.classList.toggle("show", off);
+  if (off){
+    const t = $("btBannerText");
+    if (t) t.textContent = s.bt_msg
+      ? "电脑蓝牙没开（" + s.bt_msg + "）"
+      : "电脑蓝牙没开，连水表前需要先打开";
+  }
+}
+$("btOn").onclick = async () => {
+  const b = $("btOn");
+  b.disabled = true; b.textContent = "正在打开…";
+  const r = await api("/api/bt/enable", {});
+  b.disabled = false; b.textContent = "打开蓝牙";
+  if (r && r.ok){
+    toast("✓ " + (r.msg || "已打开蓝牙"), "ok", 3000);
+    logNote("✓ " + (r.msg || "已打开蓝牙") + "，可以点「搜寻水表」了", "ok");
+    refresh();
+  } else {
+    toast("⚠ " + ((r && r.msg) || "没能自动打开，请用「蓝牙设置」手动打开"), "warn", 6000);
+  }
+};
+$("btSet").onclick = async () => {
+  const r = await api("/api/bt/settings", {});
+  if (!r || !r.ok) toast("⚠ 打不开设置，请手动到「设置 → 蓝牙和其他设备」打开蓝牙", "warn", 6000);
+};
 
 /* ── 日志：人话版 / 详细版 + 可滚动可复制 ── */
 function logLine(box, frag, cls, content){
