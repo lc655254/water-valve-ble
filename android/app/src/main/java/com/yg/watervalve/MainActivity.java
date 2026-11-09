@@ -1196,9 +1196,17 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
         box.addView(retry);
 
+        TextView probe = dialogTonal("检测是否被占用（约 10 秒）");
+        probe.setOnClickListener(v -> {
+            tap(v);
+            dialog.dismiss();
+            probeOccupancy(item);
+        });
+        box.addView(probe);
+
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        TextView fix = dialogGhost("按提示排查");
+        TextView fix = dialogGhost("排查步骤");
         fix.setOnClickListener(v -> {
             tap(v);
             dialog.dismiss();
@@ -1263,6 +1271,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private static final String ACT_SCAN = "scan";
     private static final String ACT_CONNECT = "connect";
+    private static final String ACT_PROBE = "probe";
     private static final String ACT_CLOSE = "close";
 
     private static final class DiagOption {
@@ -1364,31 +1373,32 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 act("知道了", ACT_CLOSE)));
 
         m.put("b1", new DiagStep("排查 · 1 / 2", "连不上，一定是有人占着连接",
-                "扫到了却连不上，只有一种可能：这块表已经被别人连着 —— 宿舍里谁的手机还连着它"
-                        + "（官方 App 连着也算）。\n\n水表一次只接受一个连接，别人不断开，谁也连不上。",
-                act("问过了，大家蓝牙都关了 → 重试", ACT_CONNECT),
-                go("室友不在，找不到人问", "b_wait"),
-                go("想先确认是不是真被占着", "b_check")));
+                "扫到了却连不上，只有一种可能：这块表已经被别人连着 —— 宿舍里谁的手机还连着它。\n\n"
+                        + "水表一次只接受一个连接，别人不断开，谁也连不上。",
+                go("去问一圈：谁连着水表", "b_check"),
+                go("问过了，都说没连", "b_again"),
+                go("室友不在 / 问不到", "b_wait")));
 
-        m.put("b_check", new DiagStep("排查 · 怎么确认", "先确认是谁连着",
-                "① 在宿舍里问一圈：刚才谁连过水表、谁在开水\n"
-                        + "② 看谁的手机蓝牙里 KLCXKJ-Water 显示「已连接」\n"
-                        + "③ 你自己手机如果还连着，也算占用",
-                act("确认没人连着 → 重试", ACT_CONNECT),
-                go("我自己手机还连着", "b_unpair"),
+        m.put("b_check", new DiagStep("排查 · 怎么确认", "确认一下是谁连着",
+                "① 问刚才谁开过水、谁手机蓝牙里 KLCXKJ-Water 显示「已连接」\n"
+                        + "② 让你自己手机也看一眼：蓝牙列表里是不是还连着它\n"
+                        + "③ 对方把手机蓝牙关掉，连接立刻就断",
+                act("他关了 → 重试连接", ACT_CONNECT),
+                go("都问过了，都说没连", "b_again"),
                 go("室友不在，问不到", "b_wait")));
 
-        m.put("b_unpair", new DiagStep("排查 · 自己的手机", "先取消自己手机的配对",
-                "① 设置 → 蓝牙 → KLCXKJ-Water → 取消配对 / 忘记此设备\n"
-                        + "② 关掉蓝牙再打开\n"
-                        + "③ 回来点「重试」",
-                act("取消好了 → 重试", ACT_CONNECT),
-                go("还是连不上", "b_wait")));
+        m.put("b_again", new DiagStep("排查 · 2 / 2", "那就再确认一次",
+                "有时候对方刚断开，水表还没释放连接，隔 10 秒再连一次通常就好了。\n\n"
+                        + "如果还是连不上，跑一次占用检测：连续 3 次快速连接，全失败基本就能确定是被占用。",
+                act("现在重试连接", ACT_CONNECT),
+                act("跑一次占用检测（约 10 秒）", ACT_PROBE),
+                go("室友不在，先等等", "b_wait")));
 
         m.put("b_wait", new DiagStep("排查 · 等一等", "等几分钟，或者直接让人关蓝牙",
                 "对方手机长时间不用，水表会把连接踢掉，一般 3–5 分钟。\n\n"
                         + "等不及的话最直接：回宿舍喊一声，谁连着水表先把蓝牙关一下。",
-                act("等过了 → 重试", ACT_CONNECT),
+                act("等过了 → 重试连接", ACT_CONNECT),
+                act("跑一次占用检测", ACT_PROBE),
                 act("知道了", ACT_CLOSE)));
 
         return m;
@@ -1489,7 +1499,161 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             } else {
                 toast("先扫描，点一下自己的水表");
             }
+        } else if (ACT_PROBE.equals(action)) {
+            probeOccupancy(connectingItem);
         }
+    }
+
+    // ---- 占用检测：连续 3 次快速连接，全失败基本就是被别人连着 ----
+
+    private static final int PROBE_ATTEMPTS = 3;
+    private static final long PROBE_WINDOW_MS = 3000;
+
+    private void probeOccupancy(final ValveManager.ScanItem item) {
+        if (item == null) {
+            toast("先扫描，点一下自己的水表");
+            return;
+        }
+        if (manager.isRunning() || manager.hasOpenSession()) {
+            toast("正在放水，先关水再检测");
+            return;
+        }
+        if (manager.isConnected()) {
+            toast("已经连着这块水表了");
+            return;
+        }
+        final String name = item.name == null || item.name.isEmpty() ? "水表" : item.name;
+
+        final LinearLayout box = dialogCard();
+        box.addView(dialogLabel("OCCUPANCY"));
+        box.addView(dialogTitle("检测是否被占用"));
+        box.addView(dialogSub(name));
+        final TextView status = dialogNote("准备开始，最多 10 秒…");
+        status.setTextSize(12.5f);
+        status.setPadding(0, dp(12), 0, 0);
+        box.addView(status);
+        final LinearLayout lines = new LinearLayout(this);
+        lines.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        llp.topMargin = dp(10);
+        box.addView(lines, llp);
+
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(false);
+        TextView cancel = dialogGhost("取消检测");
+        cancel.setOnClickListener(v -> {
+            tap(v);
+            manager.cancelConnect();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
+        clp.topMargin = dp(6);
+        box.addView(cancel, clp);
+        showStyledDialog(dialog, box, 0.88f);
+
+        probeAttempt(item, dialog, status, lines, 1, new ArrayList<String>());
+    }
+
+    private void probeAttempt(final ValveManager.ScanItem item, final Dialog dialog,
+                              final TextView status, final LinearLayout lines,
+                              final int attempt, final List<String> results) {
+        if (attempt > PROBE_ATTEMPTS) {
+            probeVerdict(dialog, results);
+            return;
+        }
+        status.setText("第 " + attempt + " / " + PROBE_ATTEMPTS + " 次：正在连接…");
+        manager.connect(item);
+        final long t0 = System.currentTimeMillis();
+        uiHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!dialog.isShowing()) {
+                    manager.cancelConnect();
+                    return;
+                }
+                if (manager.isConnected()) {
+                    probeLine(lines, "第 " + attempt + " 次：连上了 ✓", R.color.success);
+                    probeVerdict(dialog, results);
+                    return;
+                }
+                long ms = System.currentTimeMillis() - t0;
+                if (manager.isBusy() && ms < PROBE_WINDOW_MS) {
+                    uiHandler.postDelayed(this, 200);
+                    return;
+                }
+                // 3 秒还没连上（或者已经报错）：中断这次尝试，记下结果
+                String tag = manager.isBusy() ? "超时"
+                        : shortErr(manager.getLastConnectError());
+                if (manager.isBusy()) manager.cancelConnect();
+                results.add(tag);
+                probeLine(lines, "第 " + attempt + " 次：连不上（" + tag + "）", R.color.danger);
+                uiHandler.postDelayed(() -> probeAttempt(item, dialog, status, lines,
+                        attempt + 1, results), 450);
+            }
+        });
+    }
+
+    private void probeVerdict(Dialog dialog, List<String> results) {
+        dialog.dismiss();
+        if (manager.isConnected()) {
+            connected = true;
+            renderWaterStatus();
+            toast("✓ 没有被占用，已经连上了");
+            manager.query();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String r : results) {
+            if (sb.length() > 0) sb.append(" / ");
+            sb.append(r);
+        }
+        LinearLayout box = dialogCard();
+        box.addView(dialogLabel("RESULT"));
+        box.addView(dialogTitle("基本可以确定：有人正连着这块表"));
+        TextView body = dialogBody("连续 " + PROBE_ATTEMPTS + " 次都连不上（" + sb + "）。\n\n"
+                + "水表一次只接受一个连接 —— 让对方把手机蓝牙关掉（关蓝牙就会断开），"
+                + "或者等 3–5 分钟水表自己把连接踢掉，再点重试。");
+        body.setPadding(0, dp(14), 0, 0);
+        box.addView(body);
+        final Dialog d = new Dialog(this);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        Button retry = dialogPrimary("重试连接");
+        retry.setOnClickListener(v -> {
+            tap(v);
+            d.dismiss();
+            if (connectingItem != null) connectTo(connectingItem);
+        });
+        box.addView(retry);
+        TextView close = dialogGhost("关闭");
+        close.setOnClickListener(v -> {
+            tap(v);
+            d.dismiss();
+        });
+        box.addView(close, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        showStyledDialog(d, box, 0.9f);
+    }
+
+    private void probeLine(LinearLayout lines, String text, int colorRes) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(12f);
+        tv.setTextColor(getColor(colorRes));
+        tv.setPadding(0, dp(3), 0, dp(3));
+        lines.addView(tv);
+    }
+
+    private String shortErr(String err) {
+        if (err == null || err.isEmpty()) return "失败";
+        String e = err.toLowerCase(Locale.ROOT);
+        if (e.contains("133")) return "133";
+        if (e.contains("超时") || e.contains("timeout")) return "超时";
+        if (e.contains("ff02") || e.contains("ff01")) return "FF02";
+        return "失败";
     }
 
     // ---- 弹窗零件：和公告 / 更新弹窗同一套圆角卡片风格 ----
@@ -1583,6 +1747,20 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         lp.topMargin = dp(16);
         b.setLayoutParams(lp);
         return b;
+    }
+
+    private TextView dialogTonal(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(13);
+        v.setTextColor(getColor(R.color.primary));
+        v.setBackgroundResource(R.drawable.bg_button_tonal);
+        v.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        lp.topMargin = dp(10);
+        v.setLayoutParams(lp);
+        return v;
     }
 
     private TextView dialogGhost(String text) {
