@@ -1,6 +1,21 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.0）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.1）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.1 会话失效与主题补漏（2026-11-10）
+
+真机日志（vivo V2505A / Android 16）暴露了两件事：`errorCode=8 登录失效` 之后应用还在用死会话，
+而且重新登录被自己的防重复逻辑挡住了。
+
+- `Cloud.watchSession()` + `checkSession()`：`request()` 解析出 `errorCode=8` 就回调一次（5 秒节流），
+  `ValveManager.onSessionExpired()` 清 `session`、清 prefs、`onSession(null)`；
+  `MainActivity.onSession(null)` 直接把登录页顶上来，提示「登录已失效，请重新获取验证码登录」
+- `doGateLogin()` 不再用 `getSession() != null` 拦截，改成「同一个验证码 20 秒内只提交一次」，
+  会话失效后可以正常重登；`lookupCloudFor()` 的 MAC 变体循环里也加了 `session == null` 就 break，
+  一次扫描不再打十几次 `device/info/mac`
+- 主题补漏：`btnScan` / `btnQuery` 加进 accents；`retint()` 通过 `looksThemed()` 认得
+  「静态主色 / 任意预设色 / 自定义色 / 上次用的主色」，换第二次主题也能重染，不会只生效一次
+- `BillingCheck` 遇到 `errorCode=8` 直接提示先重新登录
 
 ## 0.12.0 换主题/背景图实时生效（2026-11-09）
 
@@ -225,7 +240,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.0（versionCode 60），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.1（versionCode 61），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

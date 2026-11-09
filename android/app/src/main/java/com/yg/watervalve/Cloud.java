@@ -23,6 +23,28 @@ public final class Cloud {
 
     private Cloud() {}
 
+    /** 会话失效（errorCode=8）时回调一次，让上层清掉死会话。 */
+    public interface SessionWatcher {
+        void onExpired();
+    }
+
+    private static volatile SessionWatcher sessionWatcher;
+    private static volatile long lastExpiredNotify;
+
+    public static void watchSession(SessionWatcher w) {
+        sessionWatcher = w;
+    }
+
+    /** 云端用 HTTP 200 + errorCode=8 表示登录失效，这里统一识别，5 秒内只通知一次。 */
+    private static void checkSession(JSONObject d) {
+        if (d == null || d.optInt("errorCode", 0) != 8) return;
+        long now = System.currentTimeMillis();
+        if (now - lastExpiredNotify < 5000) return;
+        lastExpiredNotify = now;
+        SessionWatcher w = sessionWatcher;
+        if (w != null) w.onExpired();
+    }
+
     public static String smsSecret(String phone) {
         return Protocol.md5(phone.substring(0, 3) + phone.substring(7) + "klcx");
     }
@@ -315,7 +337,9 @@ public final class Cloud {
             DebugLog.http(method, url, body, code, sb.toString(),
                     System.currentTimeMillis() - t0, note, null);
             if (sb.length() == 0) throw new ApiException(code, "云端返回空响应 HTTP " + code);
-            return new JSONObject(sb.toString());
+            JSONObject d = new JSONObject(sb.toString());
+            checkSession(d);
+            return d;
         } catch (Exception e) {
             DebugLog.http(method, url, body, code, null,
                     System.currentTimeMillis() - t0, "net=" + DebugLog.netType(), e);

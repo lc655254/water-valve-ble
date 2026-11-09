@@ -146,6 +146,20 @@ public final class ValveManager {
         running = safetyOpen;
         lastDevice = resolveSavedDevice();
         ble = new BleClient(ctx, bleListener);
+        // 云端回 errorCode=8 时清掉死会话，别拿它继续刷接口、也别挡住重新登录
+        Cloud.watchSession(this::onSessionExpired);
+    }
+
+    /** 会话失效：清掉本地 session，界面会回到登录页 */
+    private void onSessionExpired() {
+        if (session == null) return;
+        session = null;
+        prefs.edit().remove("session").apply();
+        DebugLog.line("session", "云端回 errorCode=8（登录失效），已清除本地会话");
+        log("登录已失效，请重新登录");
+        main.post(() -> {
+            if (listener != null) listener.onSession(null);
+        });
     }
 
     public void setListener(Listener l) {
@@ -1111,6 +1125,7 @@ public final class ValveManager {
             Cloud.DeviceInfo found = null;
             boolean hadResponse = false;
             for (String cand : macCandidates(addr)) {
+                if (session == null) break;   // 会话刚失效：别再拿死会话挨个试 MAC 变体
                 Cloud.DeviceInfo info = Cloud.queryDevice(session, cand);
                 if (info == null) continue;
                 hadResponse = true;
