@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 娣辫壊妯″紡锛堣窡闅忕郴缁燂級锛氬彧瑕嗙洊璇箟鑹诧紝drawable 鑷姩璺熼殢 -->
     <color name="bg">#0B0F17</color>
@@ -31,4 +31,7 @@
     <color name="blob_2">#1F3B82F6</color>
     <color name="btn_primary_top">#5C88FF</color>
     <color name="btn_primary_bottom">#3F6BEF</color>
+    <!-- 关水按钮：深色模式翻成浅底深字，别变成一坨灰 -->
+    <color name="btn_stop_bg">#E9EEF7</color>
+    <color name="btn_stop_text">#0B0F17</color>
 </resources>

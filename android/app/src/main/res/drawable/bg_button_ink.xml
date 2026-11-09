@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 关水按钮：浅色模式深底白字，深色模式浅底深字（配色见 btn_stop_*） -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#33FFFFFF">
     <item>
         <shape>
-            <solid android:color="@color/ink" />
+            <solid android:color="@color/btn_stop_bg" />
             <corners android:radius="999dp" />
         </shape>
     </item>

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="bg">#F5F6F8</color>
     <color name="card">#FFFFFF</color>
@@ -30,4 +30,7 @@
     <color name="blob_2">#1F60A5FA</color>
     <color name="btn_primary_top">#3D6BFF</color>
     <color name="btn_primary_bottom">#2050E8</color>
+    <!-- 关水按钮：浅色模式深底白字 -->
+    <color name="btn_stop_bg">#0F172A</color>
+    <color name="btn_stop_text">#FFFFFF</color>
 </resources>

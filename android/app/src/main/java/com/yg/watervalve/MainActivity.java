@@ -177,6 +177,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnWater.setText(running ? "关水" : "开水");
         btnWater.setBackgroundResource(running
                 ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
+        btnWater.setTextColor(running ? getColor(R.color.btn_stop_text) : Color.WHITE);
         waterStatus.setText(running ? "正在放水" : (connected ? "水表已连接" : "状态未知"));
         waterStatus.setTextColor(getColor(running ? R.color.primary : R.color.muted));
         updateHeader();
@@ -2202,11 +2203,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             }
             boolean waterOp = label != null
                     && (label.contains("开水") || label.contains("关") || label.contains("关水"));
+            boolean stop = label != null && label.contains("关");
             btnWater.setText(waterOp
                     ? (label + "…")
                     : (running ? "关水" : "开水"));
-            btnWater.setBackgroundResource(label != null && label.contains("关")
+            btnWater.setBackgroundResource(stop
                     ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
+            btnWater.setTextColor(stop ? getColor(R.color.btn_stop_text) : Color.WHITE);
         } else {
             btnSendCode.setText("发码");
             btnLogin.setText("登录");
@@ -2215,6 +2218,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             btnWater.setText(running ? "关水" : "开水");
             btnWater.setBackgroundResource(running
                     ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
+            btnWater.setTextColor(running ? getColor(R.color.btn_stop_text) : Color.WHITE);
         }
         if (scroll != null) scroll.post(() -> {
             if (scroll.getScrollY() == 0 && sy > 0) scroll.scrollTo(0, sy);   // 只修「被顶回顶部」，不抢用户的滚动
@@ -2228,6 +2232,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnWater.setText(running ? "关水" : "开水");
         btnWater.setBackgroundResource(running
                 ? R.drawable.bg_button_ink : R.drawable.bg_button_primary);
+        btnWater.setTextColor(running ? getColor(R.color.btn_stop_text) : Color.WHITE);
         btnWater.animate().cancel();
         btnWater.setScaleX(1f);
         btnWater.setScaleY(1f);
