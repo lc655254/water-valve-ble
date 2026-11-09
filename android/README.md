@@ -1,6 +1,17 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.11.5）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.11.6）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.11.6 清除背景后的重启提示（2026-11-09）
+
+背景图是主界面 `onCreate` 时贴到 `bgImage` 上的，`clearBgImage()` 只删文件 + 清 prefs，
+已经开着的界面还留着旧图。所以点「清除背景」不再默默 `recreate()`：
+
+- 弹窗写明「需要重启软件才会恢复默认背景」，主按钮是「立即重启」
+  （`FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK` 起一个新的 MainActivity，外观重新生成）
+- 点「取消」/ 点空白关掉弹窗，则只 `recreate()` 设置页（`confirm()` 新增 `onClose` 回调，
+  用 `handled` 标记避免主按钮路径重复执行）
+- 动作同时写进调试日志：`[op] 清除自定义背景图`
 
 ## 0.11.5 调试日志补全（2026-11-09）
 
@@ -161,7 +172,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.11.5（versionCode 55），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.11.6（versionCode 56），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
