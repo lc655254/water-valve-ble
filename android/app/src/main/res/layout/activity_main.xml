@@ -20,9 +20,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingStart="24dp"
+            android:paddingStart="20dp"
             android:paddingTop="16dp"
-            android:paddingEnd="24dp"
+            android:paddingEnd="20dp"
             android:paddingBottom="24dp">
 
             <LinearLayout
@@ -79,7 +79,7 @@
                     android:layout_width="170dp"
                     android:layout_height="170dp"
                     android:layout_gravity="end|top"
-                    android:alpha="0.06"
+                    android:alpha="0.09"
                     android:contentDescription="水滴装饰"
                     android:src="@drawable/ic_drop"
                     android:tint="@color/primary" />
@@ -125,7 +125,7 @@
                 android:id="@+id/accountCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
+                android:layout_marginTop="14dp"
                 android:background="@drawable/bg_card"
                 android:orientation="vertical"
                 android:padding="20dp">
@@ -175,26 +175,40 @@
                     android:textColor="@color/primary"
                     android:textSize="13sp" />
 
-                <TextView
-                    android:id="@+id/btnXiaolian"
-                    android:layout_width="wrap_content"
-                    android:layout_height="32dp"
-                    android:layout_marginTop="6dp"
-                    android:gravity="center"
-                    android:text="同步官方宿舍名"
-                    android:textColor="@color/primary"
-                    android:textSize="11sp" />
+                <LinearLayout
+                    android:id="@+id/accountActions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/btnNotice"
-                    android:layout_width="wrap_content"
-                    android:layout_height="32dp"
-                    android:layout_marginTop="2dp"
-                    android:gravity="center"
-                    android:text="查看公告"
-                    android:textColor="@color/primary"
-                    android:textSize="11sp"
-                    android:visibility="gone" />
+                    <TextView
+                        android:id="@+id/btnXiaolian"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:background="@drawable/bg_button_ghost"
+                        android:gravity="center"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:text="同步官方宿舍名"
+                        android:textColor="@color/primary"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/btnNotice"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_button_tonal"
+                        android:gravity="center"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:text="查看公告"
+                        android:textColor="@color/primary"
+                        android:textSize="11sp"
+                        android:visibility="gone" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:id="@+id/loginFields"
@@ -497,8 +511,8 @@
                         android:layout_weight="1"
                         android:letterSpacing="0.08"
                         android:text="运行日志"
-                        android:textColor="@color/ink"
-                        android:textSize="12sp" />
+                        android:textColor="@color/muted"
+                        android:textSize="11sp" />
 
                     <TextView
                         android:id="@+id/btnToggleLog"

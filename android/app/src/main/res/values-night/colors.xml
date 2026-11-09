@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式（跟随系统）：只覆盖语义色，drawable 自动跟随 -->
+    <color name="bg">#0B0F17</color>
+    <color name="card">#151B26</color>
+    <color name="ink">#E9EEF7</color>
+    <color name="muted">#8D97A8</color>
+    <color name="primary">#4C7DFF</color>
+    <color name="primary_dark">#3A66E0</color>
+    <color name="aqua">#5B9BFF</color>
+    <color name="success">#34D399</color>
+    <color name="danger">#F87171</color>
+    <color name="outline">#232B3A</color>
+    <color name="line">#232B3A</color>
+    <color name="input">#1A2130</color>
+    <color name="log_bg">#0E131C</color>
+    <color name="log_text">#9AA8BC</color>
+    <color name="header_dark">#0B0F17</color>
+    <color name="white_70">#A9B2C0</color>
+    <color name="white_40">#6B7688</color>
+    <color name="white_12">#1E2635</color>
+    <color name="amber">#FBBF24</color>
+    <color name="green_light">#34D399</color>
+    <color name="badge_green_bg">#10291F</color>
+    <color name="accent_soft">#16203A</color>
+    <color name="bound_line">#2E4A7A</color>
+</resources>

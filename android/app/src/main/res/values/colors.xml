@@ -22,4 +22,5 @@
     <color name="green_light">#10B981</color>
     <color name="badge_green_bg">#ECFDF5</color>
     <color name="accent_soft">#EEF3FF</color>
+    <color name="bound_line">#C9DCFF</color>
 </resources>

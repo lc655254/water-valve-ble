@@ -13,6 +13,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
@@ -23,6 +24,7 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -61,7 +63,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private TextView btnXiaolian;
     private TextView btnNotice;
     private Announcement.Info currentNotice;
-    private LinearLayout deviceList, header, bottomBar, loginFields, logBody, statHistory;
+    private LinearLayout deviceList, header, bottomBar, loginFields, logBody, statHistory, accountActions;
     private ScrollView logScroll;
     private View statusBarScrim, root;
     private ScrollView scroll;
@@ -124,6 +126,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         btnNotice = findViewById(R.id.btnNotice);
         deviceList = findViewById(R.id.deviceList);
         statHistory = findViewById(R.id.statHistory);
+        accountActions = findViewById(R.id.accountActions);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
         statusBarScrim = findViewById(R.id.statusBarScrim);
@@ -455,10 +458,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             if (info == null) {
                 currentNotice = null;
                 btnNotice.setVisibility(View.GONE);
+                if (accountActions != null) accountActions.setVisibility(View.GONE);
                 return;
             }
             currentNotice = info;
             btnNotice.setVisibility(View.VISIBLE);
+            if (accountActions != null) accountActions.setVisibility(View.VISIBLE);
             if (info.once && Announcement.seen(this, info.id)) return;
             showAnnouncementDialog(info);
         });
@@ -790,11 +795,16 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         Window w = getWindow();
         w.setStatusBarColor(Color.TRANSPARENT);
         w.setNavigationBarColor(getColor(R.color.bg));
-        w.getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        // 深色模式下状态栏/导航栏图标要变白，否则黑图标压在深色背景上看不见
+        boolean night = (getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+        if (!night) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        w.getDecorView().setSystemUiVisibility(flags);
 
         final int headerTop = header.getPaddingTop();
         final int bottomPad = bottomBar.getPaddingBottom();
@@ -1212,21 +1222,38 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         head.setText("最近记录");
         head.setTextSize(10);
         head.setTextColor(getColor(R.color.muted));
-        head.setPadding(0, 0, 0, dp(4));
+        head.setPadding(0, 0, 0, dp(2));
         statHistory.addView(head);
         SimpleDateFormat f = new SimpleDateFormat("MM-dd HH:mm", Locale.CHINA);
         for (int i = arr.length() - 1; i >= 0; i--) {
             org.json.JSONObject r = arr.optJSONObject(i);
             if (r == null) continue;
             String when = f.format(new Date(r.optLong("ts", 0)));
-            TextView row = new TextView(this);
-            row.setText(String.format(Locale.CHINA, "%s · %s%.2f L · %d 秒 · 省 ¥%.3f",
+            // 左：时间 + 用量 + 时长；右：省下的钱（右对齐，方便扫一眼对比）
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(4), 0, dp(4));
+            TextView left = new TextView(this);
+            left.setText(String.format(Locale.CHINA, "%s · %s%.1f L · %d 秒",
                     when, r.optBoolean("estimated", false) ? "约 " : "",
-                    r.optDouble("liters", 0), r.optInt("seconds", 0),
-                    r.optDouble("saved", 0)));
-            row.setTextSize(11.5f);
-            row.setTextColor(getColor(R.color.ink));
-            row.setPadding(0, dp(3), 0, dp(3));
+                    r.optDouble("liters", 0), r.optInt("seconds", 0)));
+            left.setTextSize(11.5f);
+            left.setTextColor(getColor(R.color.ink));
+            left.setSingleLine(true);
+            left.setEllipsize(TextUtils.TruncateAt.END);
+            row.addView(left, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            TextView right = new TextView(this);
+            right.setText(String.format(Locale.CHINA, "省 ¥%.2f", r.optDouble("saved", 0)));
+            right.setTextSize(11.5f);
+            right.setTextColor(getColor(R.color.success));
+            right.setSingleLine(true);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rlp.leftMargin = dp(10);
+            row.addView(right, rlp);
             statHistory.addView(row);
         }
     }
@@ -1432,10 +1459,14 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         }
         if (devices.isEmpty()) {
             TextView tv = new TextView(this);
-            tv.setText("没有扫描到水表，靠近水表再试");
+            tv.setText("没有扫描到水表，靠近水表再试 · 点这里看排查方法");
             tv.setTextSize(12);
             tv.setTextColor(getColor(R.color.muted));
             tv.setPadding(dp(8), dp(10), dp(8), dp(6));
+            tv.setOnClickListener(v -> {
+                tap(v);
+                showTroubleshoot();
+            });
             deviceList.addView(tv);
         }
     }
