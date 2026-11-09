@@ -14,6 +14,7 @@ import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -71,6 +72,12 @@ public final class BleClient {
     private volatile int lastWriteStatus = -1;
     /** 这台设备/模块整帧长写连续失败几次：≥2 就只用分片，省掉每帧 3 秒空等 */
     private int wholeFailures;
+    /** 长写能力记在 prefs 里，下次连同一块表不用再试 */
+    private String wholeKey = "";
+
+    private SharedPreferences blePrefs() {
+        return context.getSharedPreferences("water_valve", Context.MODE_PRIVATE);
+    }
     private volatile boolean ready;
     private volatile boolean scanning;
     private String selectedName = "";
@@ -194,6 +201,14 @@ public final class BleClient {
         selectedName = safeName(d);
         DebugLog.line("ble", "连接 " + selectedName + " (" + d.getAddress() + ")");
         listener.onLog("正在连接 " + selectedName + " (" + d.getAddress() + ")…");
+        // 这台表上次就连错两次长写：这次直接走分片，省掉每帧 2~3 秒的空等
+        try {
+            wholeKey = "ww_broken_" + d.getAddress();
+        } catch (SecurityException e) {
+            wholeKey = "";
+        }
+        wholeFailures = wholeKey.isEmpty() ? 0 : (blePrefs().getBoolean(wholeKey, false) ? 2 : 0);
+        if (wholeFailures >= 2) DebugLog.line("ble", "这台表长写不通，直接用 20 字节分片");
         try {
             gatt = d.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE);
         } catch (SecurityException e) {
@@ -425,6 +440,10 @@ public final class BleClient {
             wholeFailures++;
             DebugLog.line("ble", "整帧写入失败（第 " + wholeFailures + " 次），改用分片");
             listener.onLog("整帧写入失败，退回 " + CHUNK + " 字节分片（" + all.length + "B）");
+            if (wholeFailures >= 2 && !wholeKey.isEmpty()) {
+                // 记下来：这块表下次连接直接用分片
+                blePrefs().edit().putBoolean(wholeKey, true).apply();
+            }
         }
         for (int off = 0; off < all.length; off += CHUNK) {
             byte[] part = Arrays.copyOfRange(all, off, Math.min(off + CHUNK, all.length));
@@ -492,8 +511,16 @@ public final class BleClient {
     }
 
     public Protocol.Query queryStatus() throws Exception {
-        Protocol.Frame f = sendAndWait("23", "00", 10000);
-        return Protocol.parseQuery23(f.dataArea);
+        try {
+            Protocol.Frame f = sendAndWait("23", "00", 10000);
+            return Protocol.parseQuery23(f.dataArea);
+        } catch (TimeoutException first) {
+            // 设备偶尔漏掉一帧：等一下再问一次，别让「连接后查询」直接失败
+            DebugLog.line("ble", "23 无回帧，重试一次");
+            Thread.sleep(1200);
+            Protocol.Frame f = sendAndWait("23", "00", 8000);
+            return Protocol.parseQuery23(f.dataArea);
+        }
     }
 
     public void close() {

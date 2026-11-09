@@ -169,8 +169,10 @@ public class SettingsActivity extends Activity {
         View test = findViewById(R.id.btnBillingTest);
         if (test != null) test.setOnClickListener(v -> {
             DebugLog.op("计费自检：点实测一次");
+            boolean running = ValveManager.get(this).isRunning();
             confirm("要实测一次吗？",
-                    "会开阀放水约 8 秒再自动结算，用余额差直接验证云端扣不扣钱。"
+                    (running ? "现在正在放水，实测会先把它关掉结算，再重新开阀 8 秒。\n" : "")
+                            + "会开阀放水约 8 秒再自动结算，用余额差直接验证云端扣不扣钱。"
                             + "请先连上水表、把龙头打开。",
                     "开始实测", this::doBillingTest);
         });
