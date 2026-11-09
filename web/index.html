@@ -494,6 +494,22 @@ select{cursor:pointer}
 .devtips details{margin-top:7px}
 .devtips summary{cursor:pointer;color:var(--accent);font-size:12px;outline:none}
 .devtips details[open] summary{margin-bottom:6px}
+
+/* ── 细节打磨：选中色 / 键盘焦点 / 等宽数字 / 统一滚动条 ── */
+::selection{background:color-mix(in srgb,var(--accent) 26%,transparent)}
+.btn:focus-visible,.big:focus-visible,.tour-btns .btn:focus-visible,
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.big:focus-visible{outline-offset:3px;border-radius:var(--radius)}
+/* 数字统一等宽：账本/状态刷新时不会左右跳一格 */
+.stat-hero .num,.stat-grid b,.stat-row .num2,.stat-row .hi,.stat-row .zero,
+.devseen,.statusrow b,#log{font-variant-numeric:tabular-nums}
+/* 禁用态保留一点颜色，别糊成灰块 */
+.big:disabled{filter:saturate(.75)}
+/* 滚动条统一：默认细、悬停加深，所有可滚区域一致 */
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
+*::-webkit-scrollbar-thumb:hover{background:var(--muted-2)}
 </style>
 </head>
 <body>
@@ -845,6 +861,13 @@ document.addEventListener("keydown", e => {
     $("modal").classList.remove("show");
     const r = modalClose; modalClose = null; if (r) r(null);
   }
+});
+// 点遮罩空白处也能关（和 Esc 等效）：对话框内部的点击不触发
+$("modal").addEventListener("mousedown", e => {
+  if (e.target !== $("modal")) return;
+  if (!$("modal").classList.contains("show")) return;
+  $("modal").classList.remove("show");
+  const r = modalClose; modalClose = null; if (r) r(null);
 });
 function confirmDialog(title, desc){
   return dialog({title, desc, buttons:[
