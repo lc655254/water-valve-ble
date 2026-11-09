@@ -347,7 +347,7 @@ public final class Appearance {
 
         // 强调文字
         int[] accents = {R.id.btnToggleLogin, R.id.btnToggleLog, R.id.btnCopyLog,
-                R.id.btnNotice, R.id.scanHint, R.id.gateSend,
+                R.id.btnNotice, R.id.scanHint, R.id.gateSend, R.id.btnScan, R.id.btnQuery,
                 R.id.balance, R.id.noticeTag, R.id.noticeMore};
         for (int id : accents) {
             View v = a.findViewById(id);
@@ -362,30 +362,52 @@ public final class Appearance {
 
         // 布局里写死的主题色（蓝/绿/红）统一换成当前配色，换主题不留旧颜色
         View decor = a.getWindow() == null ? null : a.getWindow().getDecorView();
-        if (decor != null) retint(decor, a, p, success, danger);
+        int[] hits = new int[1];
+        if (decor != null) retint(decor, a, p, success, danger, hits);
+        lastPrimary = p;
+        if (hits[0] > 0) DebugLog.line("theme", "重染色 " + hits[0] + " 处文字，主色 #"
+                + String.format("%06X", p & 0xFFFFFF));
+    }
+
+    /** 上一次刷上去的主色：换主题后按钮文字已经是这个色，再换要认得出来。 */
+    private static int lastPrimary;
+
+    /** 这个颜色是不是「主题色」（静态资源色、任一预设色、自定义色、上次用的色）。 */
+    private static boolean looksThemed(int c, Activity a) {
+        if (c == a.getColor(R.color.primary)) return true;
+        if (lastPrimary != 0 && c == lastPrimary) return true;
+        for (Palette pal : PRESETS) {
+            if (c == pal.light || c == pal.dark) return true;
+        }
+        int custom = customColor(a);
+        if (custom != 0 && (c == custom || c == lift(custom, 0.18f))) return true;
+        return false;
     }
 
     /**
      * 递归把「布局里写死的主题色」换成当前主题色：
      * primary → 当前主色，success / danger → 跟主色协调过的语义色。
      */
-    private static void retint(View v, Activity a, int p, int success, int danger) {
+    private static void retint(View v, Activity a, int p, int success, int danger, int[] hits) {
         if (v == null) return;
         if (v instanceof TextView) {
             TextView t = (TextView) v;
             int c = t.getCurrentTextColor();
-            if (c == a.getColor(R.color.primary)) {
+            if (looksThemed(c, a)) {
                 t.setTextColor(p);
+                hits[0]++;
             } else if (c == a.getColor(R.color.success)) {
                 t.setTextColor(success);
+                hits[0]++;
             } else if (c == a.getColor(R.color.danger)) {
                 t.setTextColor(danger);
+                hits[0]++;
             }
         }
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) {
-                retint(g.getChildAt(i), a, p, success, danger);
+                retint(g.getChildAt(i), a, p, success, danger, hits);
             }
         }
     }

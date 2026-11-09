@@ -103,6 +103,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private TextView gateSend, gateHint, gateSkip, banner;
     private Button gateLogin;
     private boolean gateSkipped;
+    private String lastGateCode = "";
+    private long lastGateCodeAt;
     private long gateCodeSentAt;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     // 连接过程反馈
@@ -1233,14 +1235,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     private void doGateLogin() {
         // 自动提交和手动点「登录」可能同时触发：第二次请求会拿着已经用掉的验证码，
-        // 云端直接回「验证码已失效」，日志里就会出现「登录成功」后紧跟一条「登录失败」
+        // 云端直接回「验证码已失效」，日志里就会出现「登录成功」后紧跟一条「登录失败」。
+        // 现在按「同一个验证码 20 秒内只提交一次」去重，会话失效时也能正常重新登录。
         if (manager.isBusy()) {
             DebugLog.op("登录请求被忽略：上一个操作还在进行");
-            return;
-        }
-        if (manager.getSession() != null) {
-            DebugLog.op("登录请求被忽略：已经是登录状态");
-            hideLoginGate();
             return;
         }
         String p = gatePhone.getText().toString().trim();
@@ -1255,6 +1253,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             gateHint.setText("先填验证码");
             return;
         }
+        if (c.equals(lastGateCode) && System.currentTimeMillis() - lastGateCodeAt < 20000) {
+            DebugLog.op("登录请求被忽略：同一个验证码 20 秒内重复提交");
+            return;
+        }
+        lastGateCode = c;
+        lastGateCodeAt = System.currentTimeMillis();
         gateHint.setText("正在登录…");
         manager.savePhone(p);
         manager.login(p, c);
@@ -2359,6 +2363,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     public void onSession(Cloud.Session session) {
         renderSession(session);
+        if (session == null) {
+            // 云端回 errorCode=8：会话已经废了，直接把登录页顶上来，别等用户点开水才发现
+            gateHint.setText("登录已失效，请重新获取验证码登录");
+            gateCode.setText("");
+            showLoginGate(true);
+            toast("登录已失效，请重新登录");
+        }
     }
 
     @Override

@@ -104,7 +104,9 @@ public final class BillingCheck {
         } catch (Exception e) {
             d.append("云端账单查询失败：").append(msg(e)).append('\n');
             r.detail = d.toString();
-            r.verdict = "账单没查成，先把这条报错发我（也可能只是这个月还没消费）";
+            r.verdict = (e instanceof Cloud.ApiException && ((Cloud.ApiException) e).code == 8)
+                    ? "登录已失效，先在登录页重新登录，再回来自检"
+                    : "账单没查成，先把这条报错发我（也可能只是这个月还没消费）";
             return r;
         }
 
