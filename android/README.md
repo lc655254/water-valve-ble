@@ -1,6 +1,23 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.11.4）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.11.5）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.11.5 调试日志补全（2026-11-09）
+
+0.11.4 只记了请求和蓝牙帧，这一版把「谁在什么时候点了什么、点完钱有没有变」补齐：
+
+- **操作日志**：`tap()` 统一记一条 `[op] 点击 btnWater`；弹窗按钮没有资源 id 就退回按钮文字
+  （`点击 安装更新`）。登录被忽略、手机号不够 11 位、切前后台、界面销毁、onNewIntent 都有记录
+- **余额快照**：开水、关水、查询、结算后各查一次云端钱包并落盘
+  `[bal] 余额[关水后]：5.300 → 2.800 元`；下单前、结算后、结算未确认分别标不同 why
+- **账号/设备快照**：`[snap]` 一行给全 账号、userId、accountId、项目、余额、网络、连接、
+  放水中、安全未关、mac、deviceId、上次流水（useCount/预扣/rate1/rate2）、下单参数
+- **结算明细**：`[settle]` 记计时、计数差值、采用费率、计算过程（用量 × 费率 → 起步价 → 应扣），
+  以及实扣金额与「零用量是否生效」的判断
+- **设备帧解析**：`[dev]` 把 23 帧的 returnCode / onCharge / deviceId / productId / accountId /
+  mac / commMode / macTime / tacTimes / macType / chargeMethod 全部展开
+- **启动头**：机型、fingerprint、屏幕、内存、存储、电池、运营商、本机 IP、时区、开机时长、
+  上次连过的水表与清账形态；设置「关于」里也显示机型与系统版本
 
 ## 0.11.4 调试日志（2026-11-09）
 
@@ -144,7 +161,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.11.4（versionCode 54），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.11.5（versionCode 55），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

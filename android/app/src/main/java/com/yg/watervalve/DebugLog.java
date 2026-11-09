@@ -158,6 +158,16 @@ public final class DebugLog {
                 + "\n" + Log.getStackTraceString(t));
     }
 
+    /** 用户操作：按钮、手势、页面切换都走这里，一行一次。 */
+    public static void op(String what) {
+        line("op", what);
+    }
+
+    /** 关键阶段分隔线，导出后一眼能看出「这次开水/关水」从哪开始。 */
+    public static void section(String title) {
+        line("----", "================ " + title + " ================");
+    }
+
     /** 环境与账号信息，开启调试和每次启动都记一份，方便对照。 */
     public static void header(String why) {
         if (!on) return;
@@ -170,8 +180,20 @@ public final class DebugLog {
         sb.append("\n系统: Android ").append(Build.VERSION.RELEASE)
                 .append(" (API ").append(Build.VERSION.SDK_INT).append(")");
         sb.append("\n机型: ").append(Build.BRAND).append(' ').append(Build.MODEL)
-                .append(" / ").append(Build.DEVICE).append(" / ").append(Arrays.toString(Build.SUPPORTED_ABIS));
-        sb.append("\n语言: ").append(Locale.getDefault()).append(" / 网络: ").append(netType());
+                .append(" / device=").append(Build.DEVICE)
+                .append(" / hardware=").append(Build.HARDWARE)
+                .append(" / board=").append(Build.BOARD)
+                .append(" / abi=").append(Arrays.toString(Build.SUPPORTED_ABIS));
+        sb.append("\n指纹: ").append(Build.FINGERPRINT);
+        sb.append("\n屏幕: ").append(screenInfo());
+        sb.append("\n内存: ").append(memInfo());
+        sb.append("\n存储: ").append(storageInfo());
+        sb.append("\n电池: ").append(batteryInfo());
+        sb.append("\n网络: ").append(netType()).append(" / 运营商: ").append(carrier())
+                .append(" / 本机IP: ").append(localIp());
+        sb.append("\n语言: ").append(Locale.getDefault())
+                .append(" / 时区: ").append(java.util.TimeZone.getDefault().getID())
+                .append(" / 开机 ").append(uptime());
         SharedPreferences p = prefs();
         String theme = app.getSharedPreferences("appearance", Context.MODE_PRIVATE)
                 .getString("theme", "");
@@ -188,11 +210,110 @@ public final class DebugLog {
                         .append(" / 余额=").append(s.balance);
             }
         }
+        sb.append("\n上次设备: mac=").append(p.getString("mac", ""))
+                .append(" ble=").append(p.getString("ble_addr", ""))
+                .append(" deviceId=").append(p.getInt("dev_id", -1))
+                .append(" 名称=").append(p.getString("name", ""))
+                .append(" 清账形态=").append(p.getString("clear_pref", ""));
         String crash = p.getString("last_crash", "");
         if (crash != null && !crash.isEmpty()) {
             sb.append("\n上次崩溃: ").append(clamp(crash, 4000));
         }
         line("boot", sb.toString());
+    }
+
+    private static String screenInfo() {
+        try {
+            android.util.DisplayMetrics dm = app.getResources().getDisplayMetrics();
+            return dm.widthPixels + "x" + dm.heightPixels + " @" + dm.density + "x ("
+                    + dm.densityDpi + "dpi)";
+        } catch (Throwable e) {
+            return "?";
+        }
+    }
+
+    private static String memInfo() {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager)
+                    app.getSystemService(Context.ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            return mi.totalMem / 1048576 + "MB 总 / " + mi.availMem / 1048576 + "MB 可用";
+        } catch (Throwable e) {
+            return "?";
+        }
+    }
+
+    private static String storageInfo() {
+        try {
+            File dir = app.getFilesDir();
+            return dir.getUsableSpace() / 1048576 + "MB 可用 / "
+                    + dir.getTotalSpace() / 1048576 + "MB 总";
+        } catch (Throwable e) {
+            return "?";
+        }
+    }
+
+    private static String batteryInfo() {
+        try {
+            android.content.IntentFilter f = new android.content.IntentFilter(
+                    android.content.Intent.ACTION_BATTERY_CHANGED);
+            android.content.Intent i = app.registerReceiver(null, f);
+            if (i == null) return "?";
+            int level = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+            int scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100);
+            int status = i.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+            int pct = scale > 0 ? level * 100 / scale : level;
+            String st = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ? "充电中"
+                    : status == android.os.BatteryManager.BATTERY_STATUS_FULL ? "已充满" : "放电中";
+            return pct + "% " + st;
+        } catch (Throwable e) {
+            return "?";
+        }
+    }
+
+    private static String carrier() {
+        try {
+            android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager)
+                    app.getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm == null) return "?";
+            String op = tm.getNetworkOperatorName();
+            String sim = tm.getSimOperatorName();
+            return (op == null || op.isEmpty() ? "无服务" : op)
+                    + (sim == null || sim.isEmpty() ? "" : " / SIM " + sim);
+        } catch (Throwable e) {
+            return "?";
+        }
+    }
+
+    private static String localIp() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> nis =
+                    java.net.NetworkInterface.getNetworkInterfaces();
+            while (nis.hasMoreElements()) {
+                java.net.NetworkInterface ni = nis.nextElement();
+                if (ni.isLoopback() || !ni.isUp()) continue;
+                java.util.Enumeration<java.net.InetAddress> addrs = ni.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    java.net.InetAddress a = addrs.nextElement();
+                    if (a instanceof java.net.Inet4Address && !a.isLoopbackAddress()) {
+                        return a.getHostAddress() + " (" + ni.getName() + ")";
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return "-";
+    }
+
+    private static String uptime() {
+        try {
+            long ms = android.os.SystemClock.elapsedRealtime();
+            long s = ms / 1000;
+            return s / 3600 + "h" + (s % 3600) / 60 + "m";
+        } catch (Throwable e) {
+            return "?";
+        }
     }
 
     private static String appName() {
