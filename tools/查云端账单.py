@@ -4,6 +4,10 @@
 用法： python 查云端账单.py            # 本月
        python 查云端账单.py 2026-09    # 指定月份
 """
+
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import sys
 import time
 

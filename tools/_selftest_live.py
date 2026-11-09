@@ -4,6 +4,10 @@
 只做安全动作：读状态/偏好/统计、查账户信息与账单、扫描蓝牙、查询状态。
 不做：开阀、关阀、上传、结算。
 """
+
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import json
 import os
 import sys

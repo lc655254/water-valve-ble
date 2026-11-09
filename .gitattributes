@@ -1,0 +1,18 @@
+# 统一换行：仓库里存 LF，Windows 上检出成 CRLF，避免整文件 diff
+* text=auto eol=lf
+
+# 批处理必须 CRLF（assets/set_folder_icon.bat 是随安装包发布的运行时资源）
+*.bat text eol=crlf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.apk binary
+*.exe binary
+*.zip binary
+
+# 语言统计更准确
+*.py linguist-language=Python
+*.java linguist-language=Java
