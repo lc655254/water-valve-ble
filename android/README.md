@@ -1,6 +1,21 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.11.8）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.11.9）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.11.9 计费自检：要不要开实验（2026-11-09）
+
+「零用量连费率一起清零」这个开关不是所有设备都需要，乱开会撞上云端 226。所以加了一个自检：
+
+- **只读判断**：`Cloud.bills()` 查 `/order/query/account/bill/list`（`billType == 2` 的
+  `consumeBillDTO`，金额单位是元），和本地账本最后一笔（`ts` / `official` / `paid`）对齐时间后给结论：
+  - 账本里 `paid > 0`（上次真被扣了）→ 需要开；
+  - 最近一笔消费时间晚于上次结算且金额 > 起步价 → 需要开；
+  - 只扣了 0.025 这种起步价 → 零用量只清掉一部分，建议开着再测；
+  - 金额为 0 → 不需要开；
+  - 本月没有消费记录 → 判断不了，走实测
+- **实测**：`ValveManager.billingTest(8, cb)` 开阀 8 秒 → `closeInternal()` 正常结算 →
+  再查一次余额，`paid = before - after`；`paid > 0.03` 就是需要开，≈0 就是不需要
+- 结论写进日志：`[check] 实测结果…（实扣 0.0）`，配合 `[bal]` 的余额前后行可以复核
 
 ## 0.11.8 小圆孔不再顶内容（2026-11-09）
 
@@ -198,7 +213,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.11.8（versionCode 58），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.11.9（versionCode 59），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

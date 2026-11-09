@@ -203,9 +203,30 @@ public final class Cloud {
         return r;
     }
 
+    /**
+     * 本月云端账单（只读）。消费单在 consumeBillDTO 里，金额单位是元。
+     * 用来核对「零用量上传之后云端到底扣没扣钱」。
+     */
+    public static JSONArray bills(Session s, String month, int page) throws Exception {
+        if (s == null) throw new ApiException(-1, "还没登录");
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("telephone", s.telephone);
+        p.put("curNum", String.valueOf(page));
+        p.put("billRequestType", "0");
+        p.put("month", month);
+        p.put("loginCode", s.loginCode);
+        p.put("projectId", s.projectId);
+        p.put("userId", s.userId);
+        p.put("accountId", s.accountId);
+        JSONObject d = get("/order/query/account/bill/list", p);
+        int code = d.optInt("errorCode", -1);
+        if (code != 0) throw new ApiException(code, d.optString("errorMessage", "账单查询失败"));
+        JSONArray arr = d.optJSONArray("data");
+        return arr == null ? new JSONArray() : arr;
+    }
+
     public static String upload(Session s, String xfData, String randomNumber,
-                                String commMode) throws Exception {
-        String sig = Protocol.signature(
+                                String commMode) throws Exception {        String sig = Protocol.signature(
                 "loginCode" + s.loginCode + "telephone" + s.telephone
                         + "xfData" + xfData, s.loginCode);
         Map<String, String> p = new LinkedHashMap<>();

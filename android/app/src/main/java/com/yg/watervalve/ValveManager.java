@@ -358,8 +358,84 @@ public final class ValveManager {
         });
     }
 
-    public void closeFromService(String reason) {
-        if (closing) return;
+    /** 计费自检的结果回调。 */
+    public interface TestCallback {
+        /** @param paid 云端实扣（元），-1 表示没测出来 */
+        void done(double paid, String text);
+    }
+
+    /**
+     * 计费实测：开阀放水 seconds 秒 → 正常关阀结算 → 对比余额差，
+     * 直接回答「这台设备零用量结算会不会扣钱」，也就是要不要打开实验开关。
+     */
+    public void billingTest(final int seconds, final TestCallback cb) {
+        if (busy) {
+            if (cb != null) cb.done(-1, "正在忙，等这一笔结束再试");
+            return;
+        }
+        final Cloud.Session s = session;
+        if (s == null) {
+            if (cb != null) cb.done(-1, "先登录再测");
+            return;
+        }
+        if (!ble.isReady()) {
+            if (cb != null) cb.done(-1, "先连接水表再测");
+            return;
+        }
+        setBusy(true, "计费自检");
+        DebugLog.section("计费自检（放水 " + seconds + " 秒）");
+        DebugLog.op("计费自检：开关=" + (prefs.getBoolean("zero_rate", false) ? "开" : "关"));
+        io.execute(() -> {
+            double paid = -1;
+            String result;
+            try {
+                String b0 = Cloud.refreshBalance(s);
+                if (b0 != null && !b0.isEmpty()) s.balance = b0;
+                double before = parseMoney(s.balance);
+                log("计费自检：开阀，放水 " + seconds + " 秒");
+                openInternal();
+                if (!running) {
+                    result = "没开成阀，自检中止（看上面的日志）";
+                } else {
+                    Thread.sleep(seconds * 1000L);
+                    log("计费自检：关阀并结算");
+                    closeInternal("计费自检");
+                    String b1 = Cloud.refreshBalance(s);
+                    double after = parseMoney(b1);
+                    if (b1 != null && !b1.isEmpty()) s.balance = b1;
+                    if (before >= 0 && after >= 0) {
+                        paid = round3(before - after);
+                        String money = String.format(Locale.CHINA, "%.3f", paid);
+                        boolean on = prefs.getBoolean("zero_rate", false);
+                        if (paid > 0.03) {
+                            result = "实测结果：云端扣了 ¥" + money
+                                    + (on ? "，实验开关开着也没挡住 → 这台设备还有别的计费字段"
+                                    : "，说明零用量没生效 → 建议开启实验开关");
+                        } else {
+                            result = "实测结果：云端扣了 ¥" + money
+                                    + (on ? "，实验开关有效" : "，零用量本来就生效 → 不用开这个开关");
+                        }
+                    } else {
+                        result = "余额没取到，判断不了（看日志里的余额行）";
+                    }
+                }
+            } catch (Exception e) {
+                result = "自检失败：" + msg(e);
+                DebugLog.exc("check", e);
+            } finally {
+                setBusy(false, "");
+            }
+            DebugLog.line("check", result + "（实扣 " + paid + "）");
+            log(result);
+            final double fp = paid;
+            final String fr = result;
+            main.post(() -> {
+                if (cb != null) cb.done(fp, fr);
+            });
+        });
+    }
+
+    public void closeFromService(String reason) {        if (closing) return;
         closing = true;
         io.execute(() -> {
             try {

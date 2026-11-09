@@ -87,6 +87,7 @@ public class SettingsActivity extends Activity {
 
         setupAppearance();
         setupDebug();
+        setupBilling();
 
         // 实验开关：零用量时连费率一起清零
         TextView zeroRate = findViewById(R.id.zeroRateSwitch);
@@ -157,6 +158,62 @@ public class SettingsActivity extends Activity {
         }
         View customBtn = findViewById(R.id.btnCustomColor);
         if (customBtn != null) customBtn.setOnClickListener(v -> showCustomColorDialog());
+    }
+
+    // ── 计费自检 ────────────────────────────────────────────
+    private void setupBilling() {
+        View check = findViewById(R.id.btnBillingCheck);
+        if (check != null) check.setOnClickListener(v -> {
+            DebugLog.op("计费自检：查云端账单");
+            runBillingCheck();
+        });
+        View test = findViewById(R.id.btnBillingTest);
+        if (test != null) test.setOnClickListener(v -> {
+            DebugLog.op("计费自检：点实测一次");
+            confirm("要实测一次吗？",
+                    "会开阀放水约 8 秒再自动结算，用余额差直接验证云端扣不扣钱。"
+                            + "请先连上水表、把龙头打开。",
+                    "开始实测", this::doBillingTest);
+        });
+    }
+
+    private void runBillingCheck() {
+        final Cloud.Session s = Cloud.Session.fromJson(
+                getSharedPreferences("water_valve", MODE_PRIVATE).getString("session", ""));
+        if (s == null) {
+            toast("先登录再自检");
+            return;
+        }
+        toast("正在查云端账单…");
+        new Thread(() -> {
+            final BillingCheck.Result r = BillingCheck.run(this, s);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                DebugLog.line("check", "自检结论：" + r.verdict);
+                final String msg = r.detail + "\n" + r.verdict;
+                boolean on = getSharedPreferences("water_valve", MODE_PRIVATE)
+                        .getBoolean("zero_rate", false);
+                if (r.known && r.needZeroRate && !on) {
+                    confirm("建议开启实验开关", msg, "开启实验", () -> {
+                        getSharedPreferences("water_valve", MODE_PRIVATE)
+                                .edit().putBoolean("zero_rate", true).apply();
+                        DebugLog.op("计费自检：已按结论开启实验开关");
+                        toast("已开启：下次关水结算时连费率一起清零");
+                        recreate();
+                    });
+                } else {
+                    confirm("计费自检", msg, "知道了", null);
+                }
+            });
+        }).start();
+    }
+
+    private void doBillingTest() {
+        toast("开始实测：放水 8 秒后自动结算");
+        ValveManager.get(this).billingTest(8, (paid, text) -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            confirm("计费自检结果", text, "知道了", null);
+        }));
     }
 
     // ── 调试日志 ────────────────────────────────────────────
