@@ -52,6 +52,9 @@ public final class Updater {
             "https://api.github.com/repos/lc655254/water-valve-ble/releases/latest";
     private static final Pattern APK_NAME =
             Pattern.compile("(?i)WaterValveBLE_Android_v([0-9.]+)\\.apk");
+    /** 最新 release 里没有 APK 时，退回去翻最近 10 个 release */
+    private static final String API_LIST =
+            "https://api.github.com/repos/lc655254/water-valve-ble/releases?per_page=10";
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
@@ -71,30 +74,21 @@ public final class Updater {
             Info info = null;
             String error = null;
             try {
-                JSONObject release = getJson(API);
-                JSONArray assets = release.optJSONArray("assets");
-                Info best = null;
-                if (assets != null) {
-                    for (int i = 0; i < assets.length(); i++) {
-                        JSONObject a = assets.optJSONObject(i);
-                        if (a == null) continue;
-                        String name = a.optString("name", "");
-                        Matcher m = APK_NAME.matcher(name);
-                        if (!m.find()) continue;
-                        String v = m.group(1);
-                        if (best == null || compare(v, best.version) > 0) {
-                            Info x = new Info();
-                            x.version = v;
-                            x.url = a.optString("browser_download_url", "");
-                            x.digest = a.optString("digest", "");
-                            x.size = a.optLong("size", 0);
-                            x.notes = androidNotes(release.optString("body", ""), currentVersion(app));
-                            best = x;
-                        }
+                Info best = pickApk(getJson(API), app);
+                if (best == null) {
+                    // 最新 release 里没有 APK（例如刚发布、APK 还在上传）：
+                    // 退一步翻最近 10 个 release，取版本最高的那个 APK
+                    JSONArray list = getJsonArray(API_LIST);
+                    for (int i = 0; i < list.length(); i++) {
+                        JSONObject rel = list.optJSONObject(i);
+                        if (rel == null) continue;
+                        Info x = pickApk(rel, app);
+                        if (x == null) continue;
+                        if (best == null || compare(x.version, best.version) > 0) best = x;
                     }
                 }
                 if (best == null) {
-                    error = "Release 里没有 Android APK";
+                    error = "暂时没找到 Android 安装包（可能刚发布还在上传），稍后再点一次「检查更新」";
                 } else {
                     best.hasUpdate = compare(best.version, currentVersion(app)) > 0;
                     info = best;
@@ -107,6 +101,32 @@ public final class Updater {
             final String fe = error;
             MAIN.post(() -> cb.done(fi, fe));
         });
+    }
+
+    /** 从一个 release 的资产里挑出最高版本的 APK；没有就返回 null */
+    private static Info pickApk(JSONObject release, Context app) {
+        if (release == null) return null;
+        JSONArray assets = release.optJSONArray("assets");
+        if (assets == null) return null;
+        Info best = null;
+        for (int i = 0; i < assets.length(); i++) {
+            JSONObject a = assets.optJSONObject(i);
+            if (a == null) continue;
+            String name = a.optString("name", "");
+            Matcher m = APK_NAME.matcher(name);
+            if (!m.find()) continue;
+            String v = m.group(1);
+            if (best == null || compare(v, best.version) > 0) {
+                Info x = new Info();
+                x.version = v;
+                x.url = a.optString("browser_download_url", "");
+                x.digest = a.optString("digest", "");
+                x.size = a.optLong("size", 0);
+                x.notes = androidNotes(release.optString("body", ""), currentVersion(app));
+                best = x;
+            }
+        }
+        return best;
     }
 
     /**
@@ -417,6 +437,15 @@ public final class Updater {
     }
 
     private static JSONObject getJson(String url) throws Exception {
+        return new JSONObject(fetchText(url));
+    }
+
+    /** /releases 列表接口返回的是数组 */
+    private static JSONArray getJsonArray(String url) throws Exception {
+        return new JSONArray(fetchText(url));
+    }
+
+    private static String fetchText(String url) throws Exception {
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(20000);
@@ -433,7 +462,7 @@ public final class Updater {
             c.disconnect();
         }
         // 必须整段解码；逐块 new String 会把跨 8192 边界的 UTF-8 汉字拆成两个 �
-        return new JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private static String sha256(File f) throws Exception {
