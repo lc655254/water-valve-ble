@@ -316,8 +316,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         Appearance.apply(this);
         new Handler(Looper.getMainLooper()).postDelayed(this::checkAnnouncement, 2500);
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (!isFinishing()) checkUpdate(true);
-        }, 4000);
+            if (!isFinishing()) checkUpdateOnLaunch();
+        }, 300);
     }
 
     private void updateXiaolianButton() {
@@ -655,6 +655,44 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         });
     }
 
+    // ================= 启动即检查更新 =================
+
+    private String skippedVersion() {
+        return getSharedPreferences("ui", MODE_PRIVATE).getString("skip_version", "");
+    }
+
+    private void skipVersion(String v) {
+        getSharedPreferences("ui", MODE_PRIVATE).edit()
+                .putString("skip_version", v == null ? "" : v).apply();
+    }
+
+    /**
+     * 启动后尽快查一次：发现新版本直接弹窗，不用等用户自己去点。
+     * 用户主动「跳过这个版本」的，只在底部留一行提示。
+     */
+    private void checkUpdateOnLaunch() {
+        if (isFinishing() || isDestroyed()) return;
+        if (manager.isRunning() || manager.hasOpenSession()) return;
+        Updater.check(this, (info, error) -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (error != null) {
+                appendLog("检查更新失败：" + error);
+                return;
+            }
+            if (info == null || !info.hasUpdate) {
+                appendLog("检查更新：当前版本已是最新");
+                return;
+            }
+            appendLog("检查更新：发现新版本 v" + info.version);
+            if (info.version.equals(skippedVersion())) {
+                pendingUpdate = info;
+                btnCheckUpdate.setText("发现 v" + info.version + " · 点此更新");
+                return;
+            }
+            showUpdateDialog(info);
+        });
+    }
+
     private void showLatestDialog() {
         if (isFinishing() || isDestroyed()) return;
         View v = getLayoutInflater().inflate(R.layout.dialog_update, null);
@@ -670,6 +708,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         fillNotes(notesList, "当前版本已是最新。");
         View flow = v.findViewById(R.id.dialogFlow);
         if (flow != null) flow.setVisibility(View.GONE);
+        View skip = v.findViewById(R.id.dialogSkip);
+        if (skip != null) skip.setVisibility(View.GONE);
         install.setVisibility(View.GONE);
         later.setText("关闭");
 
@@ -741,6 +781,15 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             downloadUpdate(info);
         });
         later.setOnClickListener(x -> dialog.dismiss());
+        TextView skip = v.findViewById(R.id.dialogSkip);
+        if (skip != null) {
+            skip.setText("跳过 v" + info.version);
+            skip.setOnClickListener(x -> {
+                skipVersion(info.version);
+                dialog.dismiss();
+                toast("已跳过 v" + info.version + "，需要时点「检查更新」");
+            });
+        }
         dialog.show();
         capNotesHeight(notesScroll, notesList);
         Window dw = dialog.getWindow();

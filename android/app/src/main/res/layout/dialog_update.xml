@@ -123,4 +123,13 @@
         android:text="稍后"
         android:textColor="@color/muted"
         android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/dialogSkip"
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:gravity="center"
+        android:text="跳过这个版本"
+        android:textColor="@color/muted"
+        android:textSize="11sp" />
 </LinearLayout>
