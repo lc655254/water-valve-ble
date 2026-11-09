@@ -33,7 +33,7 @@ public class SettingsActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
-        Appearance.apply(this);
+        // 外观统一在 onResume 里刷（onCreate 紧跟一次 onResume，别刷两遍）
 
         // 全屏：背景铺进挖孔区，内容只避让刘海（小圆孔不推整页）
         final View content = findViewById(R.id.settingsContent);

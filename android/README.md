@@ -1,6 +1,16 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.5）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.6）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.6 起步价不当成用水量（2026-11-10）
+
+真机日志（13236239712 / 42B 老固件）里 `rate1=25 rate2=25`，按 `rate1/rate2` 会算成 1.00 L ——
+但 25 厘正好是起步价 0.025 元，这说明设备报的是「最低收费」，不是真实用量。
+
+- `MIN_CHARGE_LI = 25`：`rate1 <= 25` 时按流速估算并标「约」，不再把 1.00 L 当实测
+- `rate1 > 25` 才走「设备计量」，并且只在时长 ≥ 45 秒时用来校准 `flow_lpm`，短会话不参与学习
+- 修 `[snap] 下单后` 的取值时机：`lastRateOrder` / `lastOrderUseCount` 赋值后再拍快照
+- 设置页不再在 onCreate 和 onResume 各刷一遍外观
 
 ## 0.12.5 用水量取真实值（2026-11-10）
 
@@ -284,7 +294,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.5（versionCode 65），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.6（versionCode 66），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
