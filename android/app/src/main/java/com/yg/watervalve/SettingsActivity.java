@@ -35,6 +35,18 @@ public class SettingsActivity extends Activity {
         setContentView(R.layout.activity_settings);
         Appearance.apply(this);
 
+        // 全屏：背景铺进挖孔区，内容只避让挖孔与底部手势条
+        final View content = findViewById(R.id.settingsContent);
+        if (content != null) {
+            final int topPad = content.getPaddingTop();
+            final int bottomPad = content.getPaddingBottom();
+            FullScreen.apply(this, findViewById(R.id.root), (top, bottom, ime) ->
+                    content.setPadding(content.getPaddingLeft(), topPad + top,
+                            content.getPaddingRight(), bottomPad + Math.max(bottom, ime)));
+        } else {
+            FullScreen.apply(this, findViewById(R.id.root), (top, bottom, ime) -> { });
+        }
+
         TextView version = findViewById(R.id.settingsVersion);
         if (version != null) version.setText("v" + Updater.currentVersion(this));
 
@@ -460,6 +472,12 @@ public class SettingsActivity extends Activity {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        FullScreen.hideBars(this);
     }
 
     private void pickBackground() {

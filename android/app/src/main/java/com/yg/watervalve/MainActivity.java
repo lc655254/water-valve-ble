@@ -97,6 +97,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
     // 独立登录页
     private ScrollView loginGate;
+    private LinearLayout gateBody;
     private EditText gatePhone, gateCode;
     private TextView gateSend, gateHint, gateSkip, banner;
     private Button gateLogin;
@@ -158,6 +159,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         statsCard = findViewById(R.id.statsCard);
         logCard = findViewById(R.id.logCard);
         loginGate = findViewById(R.id.loginGate);
+        gateBody = findViewById(R.id.gateBody);
         gatePhone = findViewById(R.id.gatePhone);
         gateCode = findViewById(R.id.gateCode);
         gateSend = findViewById(R.id.gateSend);
@@ -1026,25 +1028,12 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void setupWindow() {
-        Window w = getWindow();
-        w.setStatusBarColor(Color.TRANSPARENT);
-        w.setNavigationBarColor(getColor(R.color.bg));
-        // 深色模式下状态栏/导航栏图标要变白，否则黑图标压在深色背景上看不见
-        boolean night = (getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
-        if (!night) {
-            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                    | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-        }
-        w.getDecorView().setSystemUiVisibility(flags);
-
+        // 全屏：铺进摄像头挖孔区、收起状态栏与导航栏，内容只避让挖孔和手势条
         final int headerTop = header.getPaddingTop();
         final int bottomPad = bottomBar.getPaddingBottom();
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = insets.getSystemWindowInsetTop();
-            int bottom = insets.getSystemWindowInsetBottom();
+        final int gateTop = gateBody == null ? 0 : gateBody.getPaddingTop();
+        final int gateBottom = gateBody == null ? 0 : gateBody.getPaddingBottom();
+        FullScreen.apply(this, root, (top, bottom, ime) -> {
             ViewGroup.LayoutParams lp = statusBarScrim.getLayoutParams();
             if (lp.height != top) {
                 lp.height = top;
@@ -1054,9 +1043,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                     header.getPaddingRight(), header.getPaddingBottom());
             bottomBar.setPadding(bottomBar.getPaddingLeft(), bottomBar.getPaddingTop(),
                     bottomBar.getPaddingRight(), bottomPad + bottom);
-            return insets;
+            if (gateBody != null) {
+                gateBody.setPadding(gateBody.getPaddingLeft(), gateTop + top,
+                        gateBody.getPaddingRight(), gateBottom + ime);
+            }
         });
-        root.requestApplyInsets();
     }
 
     private void requestPerms() {
@@ -2511,6 +2502,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     protected void onResume() {
         super.onResume();
+        FullScreen.hideBars(this);
         DebugLog.op("界面可见（onResume）");
     }
 
