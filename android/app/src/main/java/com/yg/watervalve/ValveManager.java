@@ -101,6 +101,8 @@ public final class ValveManager {
     private static final int MAX_RECOVERY_RETRY = 3;
     /** 水表不报流量时的估算出水速度（升/分钟），宿舍水龙头量级 */
     private static final double FLOW_LPM = 8.0;
+    /** 官方起步价（元/次）：实测「开了立马关」也固定扣 0.025，和 Windows 版同一口径 */
+    private static final double MIN_CHARGE_YUAN = 0.025;
     private String lastRn = "";
     private String lastRnPre = "";
     private String lastCm = "";
@@ -719,8 +721,9 @@ public final class ValveManager {
             basis = "时长太短，记为 0";
         }
         liters = Math.max(0.0, liters);
-        double byUse = liters * rate / 1000.0;
-        double charge = Math.max(byUse, 0.025);
+        // 和 Windows 版完全一致：先算按用量的金额（保留 4 位），再和起步价 0.025 取大
+        double byUse = round4(liters * rate / 1000.0);
+        double charge = round4(Math.max(byUse, MIN_CHARGE_YUAN));
         try {
             JSONObject rec = new JSONObject();
             rec.put("ts", end);
@@ -769,10 +772,11 @@ public final class ValveManager {
             double l = last == null ? 0 : last.optDouble("liters", 0);
             double s = last == null ? 0 : last.optDouble("saved", 0);
             double off = last == null ? 0 : last.optDouble("official", 0);
+            // 金额优先：跟 Windows 版一致，先给「省了多少钱」，用量放后面
             return String.format(Locale.CHINA,
-                    "本次：%d 秒 · %.3f L · 省 ¥%.3f（官方应扣 ¥%.3f · 实扣 ¥0）\n"
-                            + "累计：%d 次 · %.3f L · 省 ¥%.3f",
-                    sec, l, s, off, arr.length(), liters, saved);
+                    "本次：省 ¥%.3f · %d 秒 · %.3f L（官方应扣 ¥%.3f · 实扣 ¥0）\n"
+                            + "累计：省 ¥%.3f · %d 次 · %.3f L",
+                    s, sec, l, off, saved, arr.length(), liters);
         } catch (Exception e) {
             return "账本：读取失败";
         }

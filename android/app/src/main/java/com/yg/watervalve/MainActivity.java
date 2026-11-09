@@ -2028,19 +2028,30 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         statTotalMain.setText("—");
         statTotalSub.setText("还没有记录");
         if (text == null || text.startsWith("账本：还没有")) return;
-        Matcher m = Pattern.compile("本次：(\\d+) 秒 · ([\\d.]+) L · 省 ¥([\\d.]+)")
+        // 金额优先：主数字是「省了多少钱」，用量和时长放副标题
+        Matcher m = Pattern.compile("本次：省 ¥([\\d.]+) · (\\d+) 秒 · ([\\d.]+) L")
                 .matcher(text);
         if (m.find()) {
-            statLastMain.setText(statValue(m.group(2), "L"));
-            statLastSub.setText(m.group(1) + " 秒 · 省 ¥" + m.group(3));
+            statLastMain.setText(moneyStat(m.group(1)));
+            statLastSub.setText(m.group(2) + " 秒 · " + m.group(3) + " L");
         }
-        Matcher t = Pattern.compile("累计：(\\d+) 次 · ([\\d.]+) L · 省 ¥([\\d.]+)")
+        Matcher t = Pattern.compile("累计：省 ¥([\\d.]+) · (\\d+) 次 · ([\\d.]+) L")
                 .matcher(text);
         if (t.find()) {
-            statTotalMain.setText(statValue(t.group(2), "L"));
-            statTotalSub.setText(t.group(1) + " 次 · 省 ¥" + t.group(3));
+            statTotalMain.setText(moneyStat(t.group(1)));
+            statTotalSub.setText(t.group(2) + " 次 · " + t.group(3) + " L");
         }
         renderHistory();
+    }
+
+    /** 金额做主数字：¥ 缩到 60% 并转灰，后面数字保持大号 */
+    private CharSequence moneyStat(String yuan) {
+        String text = "¥" + yuan;
+        SpannableString sp = new SpannableString(text);
+        sp.setSpan(new RelativeSizeSpan(0.6f), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sp.setSpan(new ForegroundColorSpan(getColor(R.color.muted)), 0, 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return sp;
     }
 
     /** 数值 + 单位：数字保持大号，单位缩到 52% 并转灰，读数更清爽 */
@@ -2088,9 +2099,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dp(6), 0, dp(6));
             TextView left = new TextView(this);
-            left.setText(String.format(Locale.CHINA, "%s · %s%.1f L · %d 秒",
-                    when, r.optBoolean("estimated", false) ? "约 " : "",
-                    r.optDouble("liters", 0), r.optInt("seconds", 0)));
+            left.setText(String.format(Locale.CHINA, "%s · %d 秒 · %s%.1f L",
+                    when, r.optInt("seconds", 0),
+                    r.optBoolean("estimated", false) ? "约 " : "",
+                    r.optDouble("liters", 0)));
             left.setTextSize(11.5f);
             left.setTextColor(getColor(R.color.ink));
             left.setSingleLine(true);
@@ -2099,7 +2111,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             row.addView(left, new LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             TextView right = new TextView(this);
-            right.setText(String.format(Locale.CHINA, "省 ¥%.2f", r.optDouble("saved", 0)));
+            right.setText(String.format(Locale.CHINA, "省 ¥%.3f", r.optDouble("saved", 0)));
             right.setTextSize(11.5f);
             right.setTextColor(getColor(R.color.success));
             right.setSingleLine(true);

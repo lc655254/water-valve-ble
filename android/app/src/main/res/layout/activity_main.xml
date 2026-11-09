@@ -463,7 +463,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="本次"
+                            android:text="本次省"
                             android:textColor="@color/muted"
                             android:textSize="10sp" />
 
@@ -504,7 +504,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="累计"
+                            android:text="累计省"
                             android:textColor="@color/muted"
                             android:textSize="10sp" />
 
