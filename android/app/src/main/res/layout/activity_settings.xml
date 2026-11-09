@@ -207,6 +207,58 @@
                     android:text="个别设备/云端把扣费金额放在费率字段里，只清用量仍会扣钱。打开后连费率一起清；62B 固件可能被服务端判 226，遇到就关掉。"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@color/line" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="计费自检"
+                        android:textColor="@color/ink"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/btnBillingCheck"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="查一下"
+                        android:textColor="@color/primary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="2dp"
+                    android:text="用云端账单和本地账本对一遍，就知道零用量结算有没有被扣钱、要不要开上面这个开关。本月还没有消费记录时，点下面的「实测一次」放水 8 秒直接看余额差。"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnBillingTest"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_button_ghost"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="实测一次（放水 8 秒）"
+                    android:textColor="@color/primary"
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
