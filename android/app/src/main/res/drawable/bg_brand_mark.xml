@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 品牌标：主色微渐变，比纯色更有层次，边缘也不会显得死板 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="@color/primary" />
+    <gradient
+        android:angle="315"
+        android:endColor="@color/aqua"
+        android:startColor="@color/primary"
+        android:type="linear" />
 </shape>
