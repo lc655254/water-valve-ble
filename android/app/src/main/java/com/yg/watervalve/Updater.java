@@ -74,7 +74,14 @@ public final class Updater {
             Info info = null;
             String error = null;
             try {
-                Info best = pickApk(getJson(API), app);
+                Info best = null;
+                try {
+                    best = pickApk(getJson(API), app);
+                } catch (Exception e) {
+                    // api.github.com 在国内经常连不上：先记一笔，接着用列表接口兜底
+                    DebugLog.line("http", "检查更新：latest 接口失败（" + e.getClass().getSimpleName()
+                            + "），改用 releases 列表");
+                }
                 if (best == null) {
                     // 最新 release 里没有 APK（例如刚发布、APK 还在上传）：
                     // 退一步翻最近 10 个 release，取版本最高的那个 APK
