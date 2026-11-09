@@ -117,6 +117,8 @@ public final class ValveManager {
     private int lastRateOrder;
     /** 下单时云端返回的 useCount；关阀时用「设备计数 − 它」算本次真实用量 */
     private int lastOrderUseCount = -1;
+    /** 下单前的余额（元）；结算后对比就知道云端实际扣了多少 */
+    private double balanceBeforeOrder = -1;
     /** 最近一次连接失败的原因（GATT 状态 / 超时），给界面弹「连不上怎么办」用 */
     private volatile String lastConnectError = "";
 
@@ -431,6 +433,8 @@ public final class ValveManager {
 
         log("云端下单（预扣 5 元）…");
         Cloud.RateOrder ro = Cloud.rateOrder(session, devId, q.tacTimes, q.commMode, mac);
+        // 记下单前的余额：结算后拿它和新余额比，就知道云端到底扣没扣钱
+        balanceBeforeOrder = parseMoney(session == null ? null : session.balance);
         log("拿到 downData，费率 rate=" + ro.rate + " 厘");
 
         // 发 21 之前先落安全日志并拉起前台服务：即使下一秒进程被杀，也能恢复关阀。
@@ -622,8 +626,10 @@ public final class ValveManager {
 
         String clData = null;
         try {
-            String xf = Protocol.zeroUsage(collectFull);
-            log("零用量流水已生成（" + xf.length() / 2 + "B）");
+            boolean zeroRate = prefs.getBoolean("zero_rate", false);
+            String xf = Protocol.zeroUsage(collectFull, zeroRate);
+            log("零用量流水已生成（" + xf.length() / 2 + "B"
+                    + (zeroRate ? " · 费率也清零" : "") + "）");
             for (String rn : rns) {
                 try {
                     clData = Cloud.upload(session, xf, rn, cm);
@@ -721,6 +727,9 @@ public final class ValveManager {
             basis = "时长太短，记为 0";
         }
         liters = Math.max(0.0, liters);
+        // 把流水里的计费字段原样打出来：云端扣费对不上时，靠这几个数判断
+        log("结算原始：useCount=" + count + " 预扣=" + lastFlow.prepayI
+                + " rate1=" + lastFlow.rate1I + " rate2=" + lastFlow.rate2I);
         // 和 Windows 版完全一致：先算按用量的金额（保留 4 位），再和起步价 0.025 取大
         double byUse = round4(liters * rate / 1000.0);
         double charge = round4(Math.max(byUse, MIN_CHARGE_YUAN));
@@ -814,13 +823,52 @@ public final class ValveManager {
         try {
             String bal = Cloud.refreshBalance(session);
             if (bal != null && !bal.isEmpty()) {
+                double before = balanceBeforeOrder;
+                double after = parseMoney(bal);
                 session.balance = bal;
                 prefs.edit().putString("session", session.toJson().toString()).apply();
                 notifySession();
                 log("余额已刷新：" + Cloud.fmtMoney(bal) + " 元");
+                // 零用量结算本该不扣钱：真扣了就如实记账，别在账本里假报「省了多少」
+                if (before >= 0 && after >= 0) {
+                    double paid = round3(before - after);
+                    if (paid > 0.001) {
+                        patchLastSessionPaid(paid);
+                        log(String.format(Locale.CHINA,
+                                "⚠ 云端实际扣了 ¥%.3f（零用量结算没生效，已按实扣记账）", paid));
+                    }
+                    balanceBeforeOrder = -1;
+                }
             }
         } catch (Exception e) {
             log("余额刷新失败：" + msg(e));
+        }
+    }
+
+    private static double parseMoney(String s) {
+        if (s == null || s.trim().isEmpty()) return -1;
+        try {
+            return Double.parseDouble(s.trim());
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** 云端真扣了钱：把最后一笔账本改成「实扣」，省下的钱归零 */
+    private void patchLastSessionPaid(double paid) {
+        try {
+            JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
+            if (arr.length() == 0) return;
+            JSONObject r = arr.optJSONObject(arr.length() - 1);
+            if (r == null) return;
+            r.put("official", round4(paid));
+            r.put("paid", round4(paid));
+            r.put("saved", 0.0);
+            r.put("note", "云端实扣，零用量未生效");
+            prefs.edit().putString("ledger", arr.toString()).apply();
+            notifyStats();
+        } catch (Exception e) {
+            log("账本回写失败：" + msg(e));
         }
     }
 

@@ -1229,6 +1229,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void doGateLogin() {
+        // 自动提交和手动点「登录」可能同时触发：第二次请求会拿着已经用掉的验证码，
+        // 云端直接回「验证码已失效」，日志里就会出现「登录成功」后紧跟一条「登录失败」
+        if (manager.isBusy()) return;
+        if (manager.getSession() != null) {
+            hideLoginGate();
+            return;
+        }
         String p = gatePhone.getText().toString().trim();
         String c = gateCode.getText().toString().trim();
         if (p.length() != 11) {
@@ -1252,6 +1259,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             toast("✓ 登录成功");
             renderWaterStatus();
         } else {
+            // 已经登录成功的话，后到的失败响应（重复请求）不该把界面刷成失败
+            if (manager.getSession() != null) {
+                appendLog("忽略重复的登录响应：" + msg);
+                return;
+            }
             gateHint.setText("登录失败：" + msg);
             gateCode.setText("");
             gateCode.requestFocus();
