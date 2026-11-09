@@ -403,6 +403,13 @@ public final class ValveManager {
             double paid = -1;
             String result;
             try {
+                // 上次没确认关水时，openInternal 会走「恢复」分支、根本不会开阀，
+                // 测试就白做了。先把旧会话收干净再测。
+                if (safetyOpen || running) {
+                    log("计费自检：先关掉上次没确认的放水");
+                    closeInternal("计费自检：清理上次会话");
+                    Thread.sleep(1500);
+                }
                 String b0 = Cloud.refreshBalance(s);
                 if (b0 != null && !b0.isEmpty()) s.balance = b0;
                 double before = parseMoney(s.balance);
@@ -425,8 +432,13 @@ public final class ValveManager {
                             result = "实测结果：云端扣了 ¥" + money
                                     + (on ? "，实验开关开着也没挡住 → 这台设备还有别的计费字段"
                                     : "，说明零用量没生效 → 建议开启实验开关");
+                        } else if (paid < -0.001) {
+                            // 余额反而变多：下单预扣的 5 元被退回来了，说明这笔没扣钱
+                            result = "实测结果：预扣的 ¥" + String.format(Locale.CHINA, "%.3f", -paid)
+                                    + " 已退回、实扣 ¥0"
+                                    + (on ? "，实验开关有效" : "，零用量本来就生效 → 不用开这个开关");
                         } else {
-                            result = "实测结果：云端扣了 ¥" + money
+                            result = "实测结果：实扣 ¥" + money
                                     + (on ? "，实验开关有效" : "，零用量本来就生效 → 不用开这个开关");
                         }
                     } else {
@@ -449,7 +461,8 @@ public final class ValveManager {
         });
     }
 
-    public void closeFromService(String reason) {        if (closing) return;
+    public void closeFromService(String reason) {
+        if (closing) return;
         closing = true;
         io.execute(() -> {
             try {

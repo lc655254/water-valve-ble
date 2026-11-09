@@ -1,6 +1,19 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.1）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.2）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.2 计费自检修「假测」（2026-11-10）
+
+真机日志（vivo / 22.800 元余额）里自检结果写成「云端扣了 ¥-5.000」，原因有两个：
+
+- **阀根本没开**：手上有未确认关水的会话时，`openInternal()` 会走 `recoverIfOpen()` 分支直接返回，
+  自检随后 sleep 8 秒再「关阀」，测的是旧会话。现在 `billingTest()` 先 `closeInternal("清理上次会话")`
+  把旧账结干净，再重新下单开阀
+- **预扣退回被当成扣款**：下单预扣 5 元、结算后原路退回，`before - after = -5`。现在 `paid < -0.001`
+  单独判断，结论写「预扣的 ¥5.000 已退回、实扣 ¥0 → 不用开这个开关」
+- 顺带：`Updater.check()` 在 `api.github.com` 超时时改用 `releases?per_page=10` 兜底，不再先报一条 SocketTimeout
+- 顺带：`BleClient` 整帧长写连错两次就固定走 20 字节分片（vivo 上长写每次失败，分片能开阀也能清账），
+  省掉每帧 3 秒空等
 
 ## 0.12.1 会话失效与主题补漏（2026-11-10）
 
@@ -240,7 +253,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.1（versionCode 61），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.2（versionCode 62），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

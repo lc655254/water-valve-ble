@@ -69,6 +69,8 @@ public final class BleClient {
     private final Object writeLock = new Object();
     private volatile boolean writeDone;
     private volatile int lastWriteStatus = -1;
+    /** 这台设备/模块整帧长写连续失败几次：≥2 就只用分片，省掉每帧 3 秒空等 */
+    private int wholeFailures;
     private volatile boolean ready;
     private volatile boolean scanning;
     private String selectedName = "";
@@ -331,6 +333,7 @@ public final class BleClient {
 
     private void markReady() {
         ready = true;
+        wholeFailures = 0;
         if (connectTimeout != null) main.removeCallbacks(connectTimeout);
         connectTimeout = null;
         String n = safeName(device);
@@ -412,10 +415,17 @@ public final class BleClient {
         // 整帧一次写：官方 App 就是这么发的（writeCharacteristic 一整帧），
         // 超过 MTU-3 时由 Android 协议栈自动走长写（Prepare/Execute），
         // 模块把整帧当一次 UART 包转给 MCU —— 这是 86 清账能过的前提。
-        if (writeWhole(all)) return;
-        // 长写不被支持（特征只有无响应写 / 模块拒长写）才退回分片
-        DebugLog.line("ble", "整帧写入失败，退回分片");
-        listener.onLog("整帧写入失败，退回 " + CHUNK + " 字节分片（" + all.length + "B）");
+        // 有的机型/模块就是不吃长写（vivo 实测每次都失败），连错两次就不再试，
+        // 免得每一帧都白等 3 秒。
+        if (wholeFailures < 2 && writeWhole(all)) {
+            wholeFailures = 0;
+            return;
+        }
+        if (wholeFailures < 2) {
+            wholeFailures++;
+            DebugLog.line("ble", "整帧写入失败（第 " + wholeFailures + " 次），改用分片");
+            listener.onLog("整帧写入失败，退回 " + CHUNK + " 字节分片（" + all.length + "B）");
+        }
         for (int off = 0; off < all.length; off += CHUNK) {
             byte[] part = Arrays.copyOfRange(all, off, Math.min(off + CHUNK, all.length));
             boolean ok = false;
@@ -489,6 +499,7 @@ public final class BleClient {
     public void close() {
         if (gatt != null) DebugLog.line("ble", "关闭 GATT");
         ready = false;
+        wholeFailures = 0;
         if (connectTimeout != null) main.removeCallbacks(connectTimeout);
         connectTimeout = null;
         try {
