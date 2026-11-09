@@ -93,6 +93,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     // 连接过程反馈
     private Dialog connectDialog;
+    private Dialog failDialog;
     private ValveManager.ScanItem connectingItem;
     private String lastOnCharge = "";
 
@@ -1071,6 +1072,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         final String name = item.name == null || item.name.isEmpty() ? "水表" : item.name;
         connectingItem = item;
         if (connectDialog != null && connectDialog.isShowing()) connectDialog.dismiss();
+        if (failDialog != null && failDialog.isShowing()) {
+            failDialog.dismiss();
+            failDialog = null;
+        }
 
         LinearLayout box = dialogCard();
         box.addView(dialogLabel("CONNECTING"));
@@ -1079,7 +1084,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
 
         final ProgressBar bar = new ProgressBar(this, null,
                 android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(25);
+        bar.setMax(5);
         bar.setProgress(0);
         bar.setProgressTintList(ColorStateList.valueOf(getColor(R.color.primary)));
         bar.setProgressBackgroundTintList(ColorStateList.valueOf(getColor(R.color.outline)));
@@ -1088,11 +1093,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         blp.topMargin = dp(16);
         box.addView(bar, blp);
 
-        final TextView elapse = dialogNote("已等 0 秒 · 最多 25 秒");
+        final TextView elapse = dialogNote("已等 0 秒 · 最多 5 秒");
         elapse.setPadding(0, dp(9), 0, 0);
         box.addView(elapse);
 
-        TextView note = dialogNote("靠近水表 3 米内；先关掉官方水控 App，别让它抢连接。");
+        TextView note = dialogNote("正常情况下 1 秒内就能连上；超过 5 秒基本就是被别人占着连接。");
         note.setPadding(0, dp(6), 0, 0);
         box.addView(note);
 
@@ -1120,14 +1125,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 if (connectDialog != dialog) return;
                 if (!dialog.isShowing()) return;
                 int sec = (int) ((System.currentTimeMillis() - t0) / 1000);
-                bar.setProgress(Math.min(sec, 25));
-                if (sec < 3) {
-                    elapse.setText("已等 " + sec + " 秒 · 最多 25 秒");
-                } else if (sec < 12) {
-                    elapse.setText("已等 " + sec + " 秒 · 正在找水表服务…");
-                } else {
-                    elapse.setText("已等 " + sec + " 秒 · 信号弱，再等等…");
-                }
+                bar.setProgress(Math.min(sec, 5));
+                elapse.setText(sec < 3 ? "已等 " + sec + " 秒 · 最多 5 秒"
+                        : "已等 " + sec + " 秒 · 有人在占着连接…");
                 if (manager.isConnected()) {
                     dialog.dismiss();
                     connectDialog = null;
@@ -1137,18 +1137,18 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                     manager.query();
                     return;
                 }
-                if (sec >= 25) {
+                if (sec >= 5) {
                     dialog.dismiss();
                     connectDialog = null;
                     showConnectFailed(item);
                     return;
                 }
-                uiHandler.postDelayed(this, 400);
+                uiHandler.postDelayed(this, 250);
             }
         });
     }
 
-    /** 连接失败：一句话原因 + 最多三步能立刻做的事，按钮「重试 / 看排查 / 知道了」 */
+    /** 连接失败：一句话原因 + 两步动作，按钮「重试 / 按提示排查 / 知道了」 */
     private void showConnectFailed(ValveManager.ScanItem item) {
         if (isFinishing() || isDestroyed()) return;
         final String name = item == null || item.name == null || item.name.isEmpty()
@@ -1219,43 +1219,33 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         box.addView(row, rlp);
 
         showStyledDialog(dialog, box, 0.9f);
+        failDialog = dialog;
+        dialog.setOnDismissListener(d -> {
+            if (failDialog == dialog) failDialog = null;
+        });
     }
 
-    /** 一句话说清最可能的原因：扫到了却连不上，基本都是「有人占着这块表」 */
+    /**
+     * 扫到了却连不上，只有一种可能：这块表已经被别人连着（宿舍里谁的手机、官方 App 都算）。
+     * 水表一次只接受一个连接，所以别再往「信号弱」上引。
+     */
     private String connectCause(String err) {
         String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
         if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
             return "连上了，但没找到 FF02 / FF01 特征：可能连到了别的设备。";
         }
-        if (e.contains("133")) {
-            return "极大概率有人正连着这块表（官方 App 或别人的手机）—— 水表一次只接受一个连接。";
-        }
-        if (e.contains("超时") || e.contains("timeout")) {
-            return "多半还是被占着；也可能是等待时走远了、信号掉了。";
-        }
-        return "连不上这块表，最常见的原因就是已经有人连着它了。";
+        return "扫到了却连不上，一定是有人正占着这块表的连接（宿舍里谁的手机连着它）。";
     }
 
-    /** 最多三条能立刻做的动作 */
+    /** 两步：问宿舍的人 / 点重试 */
     private String connectSteps(String err) {
         String e = err == null ? "" : err.toLowerCase(Locale.ROOT);
         if (e.contains("ff02") || e.contains("ff01") || e.contains("特征")) {
             return "① 确认选的是 KLCXKJ-Water\n"
                     + "② 断开后重新扫描再连";
         }
-        if (e.contains("133")) {
-            return "① 关掉官方水控 App，后台也要划掉\n"
-                    + "② 有同学正在用水，等他关水退出\n"
-                    + "③ 等 10 秒再点重试";
-        }
-        if (e.contains("超时") || e.contains("timeout")) {
-            return "① 站到水表 1 米内\n"
-                    + "② 关掉官方 App，别让它抢连接\n"
-                    + "③ 点重试；还不行就按提示一步步排查";
-        }
-        return "① 关掉官方水控 App\n"
-                + "② 系统蓝牙里断开 KLCXKJ-Water\n"
-                + "③ 点重试；还不行就按提示一步步排查";
+        return "① 问一下宿舍里的人：是不是有人连了水表？让大家把蓝牙都关掉\n"
+                + "② 点「重试」";
     }
 
     /** 把错误里的关键码抽成一个短标签，比如「错误 133」「超时」「FF02」 */
@@ -1373,48 +1363,32 @@ public class MainActivity extends Activity implements ValveManager.Listener {
                 act("重启后再扫一次", ACT_SCAN),
                 act("知道了", ACT_CLOSE)));
 
-        m.put("b1", new DiagStep("排查 · 1 / 3", "连不上这块水表",
-                "扫到了却连不上，最常见的原因是：这块表已经被别人连着 —— 别人的手机、还开着的官方 App，"
-                        + "或者上一次连接没断干净。\n\n水表一次只接受一个连接。",
-                go("我开着官方 App / 有同学正在用", "b_release"),
-                go("没人用，官方 App 也关着", "b_paired"),
-                go("不确定", "b_check")));
+        m.put("b1", new DiagStep("排查 · 1 / 2", "连不上，一定是有人占着连接",
+                "扫到了却连不上，只有一种可能：这块表已经被别人连着 —— 宿舍里谁的手机还连着它"
+                        + "（官方 App 连着也算）。\n\n水表一次只接受一个连接，别人不断开，谁也连不上。",
+                act("问过了，大家蓝牙都关了 → 重试", ACT_CONNECT),
+                go("室友不在，找不到人问", "b_wait"),
+                go("想先确认是不是真被占着", "b_check")));
 
-        m.put("b_check", new DiagStep("排查 · 怎么确认", "先看这两个地方",
-                "① 后台还有没有官方水控 App 在跑（多任务里划掉）\n"
-                        + "② 系统蓝牙里 KLCXKJ-Water 是不是显示「已连接」\n\n"
-                        + "任意一条中了，就是被占用。",
-                go("确实被占着", "b_release"),
-                go("都没有，是干净的", "b_paired")));
+        m.put("b_check", new DiagStep("排查 · 怎么确认", "先确认是谁连着",
+                "① 在宿舍里问一圈：刚才谁连过水表、谁在开水\n"
+                        + "② 看谁的手机蓝牙里 KLCXKJ-Water 显示「已连接」\n"
+                        + "③ 你自己手机如果还连着，也算占用",
+                act("确认没人连着 → 重试", ACT_CONNECT),
+                go("我自己手机还连着", "b_unpair"),
+                go("室友不在，问不到", "b_wait")));
 
-        m.put("b_release", new DiagStep("排查 · 让占用方退出", "先让占用方退出，再重试",
-                "① 关掉官方水控 App，后台也要划掉\n"
-                        + "② 如果是同学正在用水，等他关水退出\n"
-                        + "③ 等 10 秒再点重试 —— 水表释放连接要一点时间",
-                act("好了，重试连接", ACT_CONNECT),
-                go("还是连不上", "b_paired")));
-
-        m.put("b_paired", new DiagStep("排查 · 2 / 3", "清掉系统里的旧配对",
-                "系统蓝牙里如果还留着 KLCXKJ-Water 的配对记录，它会一直占着连接：\n\n"
-                        + "① 设置 → 蓝牙 → KLCXKJ-Water → 取消配对 / 忘记此设备\n"
+        m.put("b_unpair", new DiagStep("排查 · 自己的手机", "先取消自己手机的配对",
+                "① 设置 → 蓝牙 → KLCXKJ-Water → 取消配对 / 忘记此设备\n"
                         + "② 关掉蓝牙再打开\n"
-                        + "③ 回来重新扫描再连",
-                act("清完了，重试连接", ACT_CONNECT),
-                go("还是连不上", "b_busy")));
+                        + "③ 回来点「重试」",
+                act("取消好了 → 重试", ACT_CONNECT),
+                go("还是连不上", "b_wait")));
 
-        m.put("b_busy", new DiagStep("排查 · 3 / 3", "水表是不是正在放水 / 结算",
-                "水表在放水、刷卡、结算中时，蓝牙通道是忙的，连上也会被踢掉。\n\n"
-                        + "① 等 1 分钟，或者把水关掉再试\n"
-                        + "② 连上后如果状态是「结算中」，点开水会自动补结算，不用手动处理",
-                act("等过了，重试连接", ACT_CONNECT),
-                go("还是连不上", "b_power")));
-
-        m.put("b_power", new DiagStep("最后一招", "给水表断电重启",
-                "① 拔掉水表电池 / 关掉这一路空开，等 10 秒再上电\n"
-                        + "② 上电后 30 秒内重新扫描连接\n\n"
-                        + "断电重启还是连不上、而官方 App 能连的话，把手机型号和这块表的 MAC 发我，我按日志查。",
-                act("重启过了，重试连接", ACT_CONNECT),
-                go("官方 App 也连不上", "a_broken"),
+        m.put("b_wait", new DiagStep("排查 · 等一等", "等几分钟，或者直接让人关蓝牙",
+                "对方手机长时间不用，水表会把连接踢掉，一般 3–5 分钟。\n\n"
+                        + "等不及的话最直接：回宿舍喊一声，谁连着水表先把蓝牙关一下。",
+                act("等过了 → 重试", ACT_CONNECT),
                 act("知道了", ACT_CLOSE)));
 
         return m;
@@ -2007,6 +1981,11 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             // 连上以后列表就没用了：清掉，别再占着屏幕
             if (deviceList != null) deviceList.removeAllViews();
             btnScan.setText("重新扫描");
+            // 5 秒判失败后又连上了：把失败弹窗收掉，别让人以为还连不上
+            if (failDialog != null && failDialog.isShowing()) {
+                failDialog.dismiss();
+                failDialog = null;
+            }
         }
         if (!connected) {
             lastOnCharge = "";
