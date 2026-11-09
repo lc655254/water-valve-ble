@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 公告条：淡蓝底 + 细边，作为整页的公告入口，而不是塞在账号卡里 -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#222557F6">
+    <item>
+        <shape>
+            <solid android:color="@color/accent_soft" />
+            <stroke
+                android:width="1dp"
+                android:color="@color/bound_line" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</ripple>
