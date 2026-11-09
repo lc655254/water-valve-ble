@@ -669,6 +669,8 @@ public final class ValveManager {
             }
             log("已关水（" + reason + "）");
             refreshBalanceAndNotify();
+            // 账单晚一点才落库：后台等 2.5 秒再取真实用水量，取到就覆盖估算
+            if (wasRunning && start > 0) applyCloudUsage(start);
         } else {
             log("关阀未确认，阀门可能仍开着，请重试或靠近水表");
             DebugLog.line("settle", "结算未确认，仍查一次余额看有没有扣钱");
@@ -851,17 +853,29 @@ public final class ValveManager {
         if (rate <= 0) rate = lastRateOrder;
 
         int delta = (cloudCount >= 0 && count >= cloudCount) ? count - cloudCount : -1;
+        // 设备自己算的钱（rate1，厘）÷ 单价（rate2，元/吨）= 这一单的水量（升）。
+        // 官方按用量计费，这个数就是水表自己的计量结果，比按秒数估算准。
+        double deviceLiters = (lastFlow.rate1I > 0 && lastFlow.rate2I > 0)
+                ? (double) lastFlow.rate1I / lastFlow.rate2I : 0;
         double liters;
         boolean estimated;
         String basis;
-        if (delta >= 2) {
+        if (deviceLiters > 0.01) {
+            liters = deviceLiters;
+            estimated = false;
+            basis = "设备计量：rate1 " + lastFlow.rate1I + " ÷ 单价 " + lastFlow.rate2I
+                    + " = " + String.format(Locale.CHINA, "%.2f", liters) + " L";
+            calibrateFlow(liters, seconds);
+        } else if (delta >= 2) {
             liters = delta;
             estimated = false;
             basis = "设备计数增量（" + count + " − " + cloudCount + "）";
         } else if (seconds > 0) {
-            liters = seconds / 60.0 * FLOW_LPM;
+            double lpm = flowLpm();
+            liters = seconds / 60.0 * lpm;
             estimated = true;
-            basis = "按 " + seconds + " 秒 × " + FLOW_LPM + " L/min 估算（水表只报次数，不报流量）";
+            basis = "按 " + seconds + " 秒 × " + String.format(Locale.CHINA, "%.2f", lpm)
+                    + " L/min 估算（这台表只报次数，不报流量）";
         } else {
             liters = 0;
             estimated = true;
@@ -901,7 +915,7 @@ public final class ValveManager {
             rec.put("official", round4(charge));
             rec.put("paid", 0.0);
             rec.put("saved", round4(charge));
-            rec.put("source", "android");
+            rec.put("source", deviceLiters > 0.01 ? "device" : (estimated ? "estimate" : "count"));
             JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
             arr.put(rec);
             while (arr.length() > 200) arr.remove(0);
@@ -916,6 +930,26 @@ public final class ValveManager {
         } catch (Exception e) {
             log("账本记录失败：" + msg(e));
         }
+    }
+
+    /** 这台表学习到的流速（L/min），没学过就用默认 8.0 */
+    private double flowLpm() {
+        float v = prefs.getFloat("flow_lpm", (float) FLOW_LPM);
+        if (v <= 0) return FLOW_LPM;
+        return Math.max(1.0, Math.min(30.0, v));
+    }
+
+    /** 用设备自己算出来的水量校准流速：下次没有水量字段时按这个估，越用越准 */
+    private void calibrateFlow(double liters, int seconds) {
+        if (liters <= 0 || seconds < 5) return;
+        double lpm = liters / (seconds / 60.0);
+        if (lpm < 1 || lpm > 30) return;
+        float old = prefs.getFloat("flow_lpm", (float) FLOW_LPM);
+        float now = (float) (old <= 0 ? lpm : old * 0.6 + lpm * 0.4);
+        prefs.edit().putFloat("flow_lpm", now).apply();
+        DebugLog.line("usage", String.format(Locale.CHINA,
+                "流速校准：本次 %.2f L / %d 秒 = %.2f L/min，学习值 %.2f L/min",
+                liters, seconds, lpm, now));
     }
 
     public String getStatsText() {
@@ -934,11 +968,19 @@ public final class ValveManager {
             double l = last == null ? 0 : last.optDouble("liters", 0);
             double s = last == null ? 0 : last.optDouble("saved", 0);
             double off = last == null ? 0 : last.optDouble("official", 0);
+            String src = last == null ? "" : last.optString("source", "");
+            // 云端账单 > 设备计量 > 计数 > 按流速估算，标注来源别把估算说成实测
+            String mark;
+            if ("cloud".equals(src)) mark = "（云端）";
+            else if ("device".equals(src)) mark = "（设备）";
+            else if ("count".equals(src)) mark = "（计数）";
+            else mark = "（约）";
+            String ltxt = String.format(Locale.CHINA, "%.3f L%s", l, mark);
             // 金额优先：跟 Windows 版一致，先给「省了多少钱」，用量放后面
             return String.format(Locale.CHINA,
-                    "本次：省 ¥%.3f · %d 秒 · %.3f L（官方应扣 ¥%.3f · 实扣 ¥0）\n"
+                    "本次：省 ¥%.3f · %d 秒 · %s（官方应扣 ¥%.3f · 实扣 ¥0）\n"
                             + "累计：省 ¥%.3f · %d 次 · %.3f L",
-                    s, sec, l, off, saved, arr.length(), liters);
+                    s, sec, ltxt, off, saved, arr.length(), liters);
         } catch (Exception e) {
             return "账本：读取失败";
         }
@@ -1016,6 +1058,102 @@ public final class ValveManager {
         } catch (Exception e) {
             return -1;
         }
+    }
+
+    /**
+     * 结算后向云端账单要「这一单真实用了多少水」，取到就覆盖账本里的估算值。
+     * 官方是按用水量计费的，账单里必然有水量，比按秒数估算准。
+     */
+    private void applyCloudUsage(final long sessionStart) {
+        io.execute(() -> {
+            try {
+                Thread.sleep(2500);          // 账单落库要一点时间
+                Cloud.Session s = session;
+                if (s == null) return;
+                String month = new java.text.SimpleDateFormat("yyyy-MM", Locale.CHINA)
+                        .format(new java.util.Date());
+                JSONArray bills = Cloud.bills(s, month, 1);
+                JSONObject best = null;
+                long bestStamp = 0;
+                for (int i = 0; i < bills.length(); i++) {
+                    JSONObject b = bills.optJSONObject(i);
+                    if (b == null || b.optInt("billType", 0) != 2) continue;
+                    JSONObject c = b.optJSONObject("consumeBillDTO");
+                    if (c == null) continue;
+                    long ts = billStamp(c);
+                    if (ts >= bestStamp) {
+                        bestStamp = ts;
+                        best = c;
+                    }
+                }
+                if (best == null) {
+                    DebugLog.line("bill", "云端账单里没有消费单，用水量继续用估算");
+                    return;
+                }
+                DebugLog.line("bill", "最新消费单：" + Usage.dump(best));
+                double liters = Usage.litersFrom(best);
+                if (liters <= 0) {
+                    DebugLog.line("bill", "账单里没找到水量字段，用水量继续用估算");
+                    return;
+                }
+                if (bestStamp > 0 && sessionStart > 0
+                        && bestStamp < sessionStart - 10 * 60 * 1000L) {
+                    DebugLog.line("bill", "最新消费单不是这一单（时间对不上），跳过");
+                    return;
+                }
+                patchLastSessionLiters(liters, best.optDouble("consumeMoney", 0));
+            } catch (Exception e) {
+                DebugLog.line("bill", "取云端用水量失败：" + msg(e));
+            }
+        });
+    }
+
+    /** 把账本最后一笔的用水量换成云端数字 */
+    private void patchLastSessionLiters(double liters, double money) {
+        try {
+            JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
+            if (arr.length() == 0) return;
+            JSONObject r = arr.optJSONObject(arr.length() - 1);
+            if (r == null) return;
+            double old = r.optDouble("liters", 0);
+            r.put("liters", round3(liters));
+            r.put("source", "cloud");
+            r.put("basis", String.format(Locale.CHINA,
+                    "云端账单用水量（本地估算 %.2f L）", old));
+            if (money > 0) r.put("official", round4(money));
+            prefs.edit().putString("ledger", arr.toString()).apply();
+            notifyStats();
+            log(String.format(Locale.CHINA, "云端用水量：%.2f L（本地估算 %.2f L）", liters, old));
+            DebugLog.line("bill", String.format(Locale.CHINA,
+                    "账本用水量改为云端值 %.2f L（原 %.2f L）", liters, old));
+        } catch (Exception e) {
+            DebugLog.line("bill", "回写用水量失败：" + msg(e));
+        }
+    }
+
+    /** 账单里的时间字段：可能是时间戳，也可能是「2026-11-10 00:34:48」 */
+    private static long billStamp(JSONObject c) {
+        for (String k : new String[]{"consumeDate", "uploadDate", "dealDate", "createTime"}) {
+            Object v = c.opt(k);
+            if (v == null || v == JSONObject.NULL) continue;
+            if (v instanceof Number) return ((Number) v).longValue();
+            String s = String.valueOf(v).trim();
+            if (s.matches("\\d{10,}")) {
+                try {
+                    return Long.parseLong(s);
+                } catch (Exception ignored) {
+                }
+            }
+            try {
+                java.text.SimpleDateFormat f =
+                        new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA);
+                f.setLenient(true);
+                java.util.Date d = f.parse(s.replace('T', ' '));
+                if (d != null) return d.getTime();
+            } catch (Exception ignored) {
+            }
+        }
+        return 0;
     }
 
     /** 云端真扣了钱：把最后一笔账本改成「实扣」，省下的钱归零 */

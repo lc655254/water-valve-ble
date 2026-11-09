@@ -222,6 +222,7 @@ public final class Cloud {
             r.raw = data.toString();
         }
         if (r.downData.isEmpty()) throw new ApiException(-1, "云端没有返回 downData");
+        if (data != null) DebugLog.line("bill", "下单返回 data：" + Usage.dump(data));
         return r;
     }
 
@@ -272,6 +273,7 @@ public final class Cloud {
                 throw new ApiException(code, d.optString("errorMessage", "上传失败"));
             }
             JSONObject data = d.optJSONObject("data");
+            if (data != null) DebugLog.line("bill", "上传返回 data：" + Usage.dump(data));
             return data == null ? null : data.optString("clData", null);
         }
         throw new ApiException(531, "上传连续被限流");
