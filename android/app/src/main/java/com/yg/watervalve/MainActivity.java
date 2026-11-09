@@ -79,7 +79,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private Announcement.Info currentNotice;
     private LinearLayout deviceList, header, bottomBar, loginFields, logBody, statHistory;
     private ScrollView logScroll;
-    private View statusBarScrim, root;
+    private View root;
+    private String lastInsetKey = "";
     private ScrollView scroll;
     private View content, heroBlock, accountCard, deviceCard, statsCard, logCard;
     private final StringBuilder logBuf = new StringBuilder();
@@ -149,7 +150,6 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         noticeBar = findViewById(R.id.noticeBar);
         header = findViewById(R.id.header);
         bottomBar = findViewById(R.id.bottomBar);
-        statusBarScrim = findViewById(R.id.statusBarScrim);
         root = findViewById(R.id.root);
         scroll = findViewById(R.id.scroll);
         content = findViewById(R.id.content);
@@ -170,6 +170,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         setupLoginGate();
 
         setupWindow();
+        // 等第一帧出来再收一次系统栏：权限弹窗、公告弹窗都可能把它放回来
+        root.post(() -> FullScreen.hideBars(this));
         manager.setListener(this);
 
         phone.setText(manager.getPhone());
@@ -1028,23 +1030,28 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void setupWindow() {
-        // 全屏：铺进摄像头挖孔区、收起状态栏与导航栏，内容只避让挖孔和手势条
-        final int headerTop = header.getPaddingTop();
+        // 全屏：窗口铺进挖孔区、收起系统栏；页面内容只避让挖孔，背景图/渐变铺满整屏
+        final int contentTopBase = content == null ? 0 : content.getPaddingTop();
+        final int contentBottom = content == null ? 0 : content.getPaddingBottom();
         final int bottomPad = bottomBar.getPaddingBottom();
         final int gateTop = gateBody == null ? 0 : gateBody.getPaddingTop();
         final int gateBottom = gateBody == null ? 0 : gateBody.getPaddingBottom();
-        FullScreen.apply(this, root, (top, bottom, ime) -> {
-            ViewGroup.LayoutParams lp = statusBarScrim.getLayoutParams();
-            if (lp.height != top) {
-                lp.height = top;
-                statusBarScrim.setLayoutParams(lp);
+        FullScreen.apply(this, root, (cutoutTop, contentTop, bottom, ime) -> {
+            String key = cutoutTop + "/" + contentTop + "/" + bottom + "/" + ime;
+            if (!key.equals(lastInsetKey)) {
+                lastInsetKey = key;
+                DebugLog.line("ui", "insets cutout=" + cutoutTop + " content=" + contentTop
+                        + " bottom=" + bottom + " ime=" + ime);
             }
-            header.setPadding(header.getPaddingLeft(), headerTop + top,
-                    header.getPaddingRight(), header.getPaddingBottom());
+            if (content != null) {
+                content.setPadding(content.getPaddingLeft(), contentTopBase + contentTop,
+                        content.getPaddingRight(), contentBottom);
+            }
             bottomBar.setPadding(bottomBar.getPaddingLeft(), bottomBar.getPaddingTop(),
                     bottomBar.getPaddingRight(), bottomPad + bottom);
             if (gateBody != null) {
-                gateBody.setPadding(gateBody.getPaddingLeft(), gateTop + top,
+                // 登录页内容是居中的，小圆孔也要让开，所以这里用挖孔原始高度
+                gateBody.setPadding(gateBody.getPaddingLeft(), gateTop + cutoutTop,
                         gateBody.getPaddingRight(), gateBottom + ime);
             }
         });
@@ -2504,6 +2511,13 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         super.onResume();
         FullScreen.hideBars(this);
         DebugLog.op("界面可见（onResume）");
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 从弹窗/通知栏/键盘回来时系统会把状态栏放出来，拿到焦点就再收一次
+        if (hasFocus) FullScreen.hideBars(this);
     }
 
     @Override
