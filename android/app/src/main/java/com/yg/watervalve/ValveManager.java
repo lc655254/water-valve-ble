@@ -187,6 +187,8 @@ public final class ValveManager {
     public void login(String phone, String code) {
         if (busy) return;
         setBusy(true, "登录");
+        DebugLog.section("登录开始");
+        DebugLog.op("登录：手机号 " + phone + "，验证码 " + (code == null ? "" : code.length()) + " 位");
         io.execute(() -> {
             final Listener l = listener;
             try {
@@ -203,11 +205,15 @@ public final class ValveManager {
                         ? s.telephone : s.userName)
                         + " · 项目 " + s.projectId
                         + (s.balance.isEmpty() ? "" : " · 余额 " + Cloud.fmtMoney(s.balance) + " 元"));
+                DebugLog.line("bal", "余额[登录后]：" + Cloud.fmtMoney(s.balance) + " 元");
+                logSnapshot("登录成功");
                 notifySession();
                 if (l != null) main.post(() -> l.onLogin(true, ""));
                 lookupExistingDevices();
             } catch (Exception e) {
                 log("登录失败：" + msg(e));
+                DebugLog.exc("login", e);
+                logSnapshot("登录失败");
                 if (l != null) main.post(() -> l.onLogin(false, msg(e)));
             } finally {
                 setBusy(false, "");
@@ -270,11 +276,15 @@ public final class ValveManager {
     public void query() {
         if (busy) return;
         setBusy(true, "查询状态");
+        DebugLog.op("查询设备状态");
         io.execute(() -> {
             try {
                 queryInternal();
+                logSnapshot("查询后");
+                logBalanceNow("查询后");
             } catch (Exception e) {
                 log("查询失败：" + msg(e));
+                DebugLog.exc("query", e);
             } finally {
                 setBusy(false, "");
             }
@@ -288,11 +298,14 @@ public final class ValveManager {
             return;
         }
         setBusy(true, "开水");
+        DebugLog.section("开水开始");
+        DebugLog.op("开水：点击开水按钮");
         io.execute(() -> {
             try {
                 openInternal();
             } catch (Exception e) {
                 log("开水中止：" + msg(e));
+                DebugLog.exc("open", e);
                 if (hasOpenSession() && !recovering) recoverIfOpen(true);
             } finally {
                 setBusy(false, "");
@@ -327,11 +340,17 @@ public final class ValveManager {
         }
         closing = true;
         setBusy(true, reason);
+        DebugLog.section("关水开始");
+        DebugLog.op("关水：原因=" + reason);
         io.execute(() -> {
             try {
                 closeInternal(reason);
+                logSnapshot("关水后");
+                logBalanceNow("关水后");
             } catch (Exception e) {
                 log("关阀异常：" + msg(e));
+                DebugLog.exc("close", e);
+                logSnapshot("关水异常");
             } finally {
                 closing = false;
                 setBusy(false, "");
@@ -369,6 +388,13 @@ public final class ValveManager {
         log("设备状态：" + q.statusText() + " · deviceId=" + q.deviceIdInt()
                 + " · 项目=" + q.projectInt() + " · MAC=" + mac
                 + " · random=" + q.tacTimes);
+        DebugLog.line("dev", "23帧解析 returnCode=" + q.returnCode + " onCharge=" + q.onCharge
+                + "(" + q.statusText() + ")"
+                + " deviceId=" + q.deviceIdInt() + " productId=" + q.productId
+                + " accountId=" + q.accountId + " mac=" + q.mac
+                + " commMode=" + q.commMode + " macTime=" + q.macTime
+                + " tacTimes=" + q.tacTimes + " macType=" + q.macType
+                + " chargeMethod=" + q.chargeMethod);
         lookupCloudDevice();
     }
 
@@ -436,6 +462,10 @@ public final class ValveManager {
         // 记下单前的余额：结算后拿它和新余额比，就知道云端到底扣没扣钱
         balanceBeforeOrder = parseMoney(session == null ? null : session.balance);
         log("拿到 downData，费率 rate=" + ro.rate + " 厘");
+        DebugLog.line("order", "下单返回 rate=" + ro.rate + " useCount=" + ro.useCount
+                + " downData=" + ro.downData + " raw=" + ro.raw);
+        logSnapshot("下单后");
+        logBalanceNow("下单后");
 
         // 发 21 之前先落安全日志并拉起前台服务：即使下一秒进程被杀，也能恢复关阀。
         openTs = System.currentTimeMillis();
@@ -482,12 +512,16 @@ public final class ValveManager {
                     if (listener != null) listener.onWater(true);
                 });
                 log("已开始放水（onCharge=" + q2.onCharge + "）");
+                DebugLog.line("order", "放水确认 onCharge=" + q2.onCharge + " 开阀时刻=" + openTs);
+                logSnapshot("放水开始");
+                logBalanceNow("放水开始");
                 return;
             }
             log("轮询 " + i + "：onCharge=" + q2.onCharge + "，等待…");
         }
         log("未确认放水，执行安全关阀");
         boolean closed = settleInternal();
+        logBalanceNow("开阀未确认");
         if (closed) {
             clearSafety();
             running = false;
@@ -534,12 +568,16 @@ public final class ValveManager {
             refreshBalanceAndNotify();
         } else {
             log("关阀未确认，阀门可能仍开着，请重试或靠近水表");
+            DebugLog.line("settle", "结算未确认，仍查一次余额看有没有扣钱");
+            logBalanceNow("结算未确认");
         }
     }
 
     /** 22 结束 → 85 采集 → 零用量上传 → 86 清账 → 23 确认。 */
     private boolean settleInternal() {
         log("开始关阀结算：22 → 85 → 零用量上传 → 86 → 23");
+        DebugLog.section("结算开始");
+        logSnapshot("结算前");
         boolean ended = false;
         for (int i = 1; i <= 2 && !ended; i++) {
             try {
@@ -727,12 +765,24 @@ public final class ValveManager {
             basis = "时长太短，记为 0";
         }
         liters = Math.max(0.0, liters);
+        DebugLog.section("结算明细");
+        DebugLog.line("settle", "计时 开始=" + start + " 结束=" + end + " 时长=" + seconds + "s"
+                + " 计数=" + count + " 云端计数=" + cloudCount + " 差值=" + delta
+                + " 预扣=" + lastFlow.prepayI + " rate1=" + lastFlow.rate1I
+                + " rate2=" + lastFlow.rate2I + " 采用费率=" + rate
+                + " 下单费率=" + lastRateOrder
+                + " 下单前余额=" + (balanceBeforeOrder < 0 ? "-"
+                        : String.format(Locale.CHINA, "%.3f", balanceBeforeOrder))
+                + " 依据=" + basis);
         // 把流水里的计费字段原样打出来：云端扣费对不上时，靠这几个数判断
         log("结算原始：useCount=" + count + " 预扣=" + lastFlow.prepayI
                 + " rate1=" + lastFlow.rate1I + " rate2=" + lastFlow.rate2I);
         // 和 Windows 版完全一致：先算按用量的金额（保留 4 位），再和起步价 0.025 取大
         double byUse = round4(liters * rate / 1000.0);
         double charge = round4(Math.max(byUse, MIN_CHARGE_YUAN));
+        DebugLog.line("settle", String.format(Locale.CHINA,
+                "结算计算 用量=%s%.3fL × %d 元/吨 = ¥%.4f → 起步价 ¥%.3f → 应扣 ¥%.4f",
+                estimated ? "约" : "", liters, rate, byUse, MIN_CHARGE_YUAN, charge));
         try {
             JSONObject rec = new JSONObject();
             rec.put("ts", end);
@@ -829,9 +879,18 @@ public final class ValveManager {
                 prefs.edit().putString("session", session.toJson().toString()).apply();
                 notifySession();
                 log("余额已刷新：" + Cloud.fmtMoney(bal) + " 元");
+                DebugLog.line("bal", String.format(Locale.CHINA,
+                        "余额[结算后]：%s → %s 元（下单前=%s）",
+                        before < 0 ? "-" : String.format(Locale.CHINA, "%.3f", before),
+                        Cloud.fmtMoney(bal),
+                        balanceBeforeOrder < 0 ? "-"
+                                : String.format(Locale.CHINA, "%.3f", balanceBeforeOrder)));
                 // 零用量结算本该不扣钱：真扣了就如实记账，别在账本里假报「省了多少」
                 if (before >= 0 && after >= 0) {
                     double paid = round3(before - after);
+                    DebugLog.line("bal", String.format(Locale.CHINA,
+                            "实扣 ¥%.3f（%s）", paid,
+                            paid > 0.001 ? "零用量结算未生效" : "未扣款"));
                     if (paid > 0.001) {
                         patchLastSessionPaid(paid);
                         log(String.format(Locale.CHINA,
@@ -839,9 +898,11 @@ public final class ValveManager {
                     }
                     balanceBeforeOrder = -1;
                 }
+                logSnapshot("结算后");
             }
         } catch (Exception e) {
             log("余额刷新失败：" + msg(e));
+            DebugLog.exc("balance", e);
         }
     }
 
@@ -1500,6 +1561,70 @@ public final class ValveManager {
         if (listener == null) DebugLog.line("vm", msg);
         main.post(() -> {
             if (listener != null) listener.onLog(msg);
+        });
+    }
+
+    /**
+     * 记一次「操作后的账户/设备快照」：账号字段、余额、连接与放水状态、上次流水与下单参数。
+     * 出问题时对着时间点看这一行就知道当时是什么局面。
+     */
+    private void logSnapshot(String why) {
+        try {
+            Cloud.Session s = session;
+            StringBuilder sb = new StringBuilder("快照[").append(why).append("]");
+            sb.append(" 时间=").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS",
+                    Locale.CHINA).format(new java.util.Date()));
+            sb.append(" 账号=").append(s == null ? "未登录" : s.telephone);
+            if (s != null) {
+                sb.append(" userId=").append(s.userId)
+                        .append(" accountId=").append(s.accountId)
+                        .append(" 项目=").append(s.projectId)
+                        .append(" 余额=").append(Cloud.fmtMoney(s.balance));
+            }
+            sb.append(" 网络=").append(DebugLog.netType());
+            sb.append(" 连接=").append(ble.isReady() ? "已连接" : "未连接")
+                    .append(" 放水中=").append(running)
+                    .append(" 安全未关=").append(safetyOpen)
+                    .append(" mac=").append(mac)
+                    .append(" deviceId=").append(devId);
+            if (lastFlow != null) {
+                sb.append(" 流水[useCount=").append(lastFlow.useCountI)
+                        .append(" 预扣=").append(lastFlow.prepayI)
+                        .append(" rate1=").append(lastFlow.rate1I)
+                        .append(" rate2=").append(lastFlow.rate2I).append("]");
+            }
+            sb.append(" 下单[rate=").append(lastRateOrder)
+                    .append(" useCount=").append(lastOrderUseCount)
+                    .append(" 下单前余额=").append(balanceBeforeOrder < 0 ? "-"
+                            : String.format(Locale.CHINA, "%.3f", balanceBeforeOrder))
+                    .append("]");
+            DebugLog.line("snap", sb.toString());
+        } catch (Throwable e) {
+            DebugLog.line("snap", "快照失败：" + e);
+        }
+    }
+
+    /** 实时查一次余额并落盘（在 io 线程排队执行，不阻塞界面）。 */
+    private void logBalanceNow(final String why) {
+        io.execute(() -> {
+            Cloud.Session s = session;
+            if (s == null) {
+                DebugLog.line("bal", "余额[" + why + "]：未登录，跳过");
+                return;
+            }
+            String before = s.balance;
+            try {
+                String bal = Cloud.refreshBalance(s);
+                if (bal != null && !bal.isEmpty()) {
+                    s.balance = bal;
+                    prefs.edit().putString("session", s.toJson().toString()).apply();
+                }
+                DebugLog.line("bal", "余额[" + why + "]：" + Cloud.fmtMoney(before) + " → "
+                        + (bal == null || bal.isEmpty() ? "查询失败" : Cloud.fmtMoney(bal)) + " 元");
+                if (bal != null && !bal.isEmpty()) notifySession();
+            } catch (Exception e) {
+                DebugLog.line("bal", "余额[" + why + "]查询异常：" + msg(e));
+            }
         });
     }
 

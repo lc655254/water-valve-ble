@@ -782,6 +782,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         dialog.setContentView(v);
         dialog.setCanceledOnTouchOutside(true);
         install.setOnClickListener(x -> {
+            DebugLog.op("更新：点安装 v" + info.version);
             dialog.dismiss();
             if (!Updater.canInstall(this)) {
                 Updater.openInstallSettings(this);
@@ -790,11 +791,15 @@ public class MainActivity extends Activity implements ValveManager.Listener {
             }
             downloadUpdate(info);
         });
-        later.setOnClickListener(x -> dialog.dismiss());
+        later.setOnClickListener(x -> {
+            DebugLog.op("更新：点稍后");
+            dialog.dismiss();
+        });
         TextView skip = v.findViewById(R.id.dialogSkip);
         if (skip != null) {
             skip.setText("跳过 v" + info.version);
             skip.setOnClickListener(x -> {
+                DebugLog.op("更新：跳过 v" + info.version);
                 skipVersion(info.version);
                 dialog.dismiss();
                 toast("已跳过 v" + info.version + "，需要时点「检查更新」");
@@ -1231,18 +1236,24 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     private void doGateLogin() {
         // 自动提交和手动点「登录」可能同时触发：第二次请求会拿着已经用掉的验证码，
         // 云端直接回「验证码已失效」，日志里就会出现「登录成功」后紧跟一条「登录失败」
-        if (manager.isBusy()) return;
+        if (manager.isBusy()) {
+            DebugLog.op("登录请求被忽略：上一个操作还在进行");
+            return;
+        }
         if (manager.getSession() != null) {
+            DebugLog.op("登录请求被忽略：已经是登录状态");
             hideLoginGate();
             return;
         }
         String p = gatePhone.getText().toString().trim();
         String c = gateCode.getText().toString().trim();
         if (p.length() != 11) {
+            DebugLog.op("登录中止：手机号不是 11 位（" + p.length() + "）");
             gateHint.setText("手机号要 11 位");
             return;
         }
         if (c.isEmpty()) {
+            DebugLog.op("登录中止：验证码为空");
             gateHint.setText("先填验证码");
             return;
         }
@@ -2490,6 +2501,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        DebugLog.op("onNewIntent：" + (intent == null ? "null" : intent.getAction()));
         if (intent != null && intent.getBooleanExtra("show_update", false)) {
             intent.removeExtra("show_update");
             new Handler(Looper.getMainLooper()).postDelayed(this::checkUpdateOnLaunch, 250);
@@ -2497,7 +2509,20 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        DebugLog.op("界面可见（onResume）");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        DebugLog.op("界面进入后台（onPause）");
+    }
+
+    @Override
     protected void onDestroy() {
+        DebugLog.op("界面销毁（onDestroy）");
         manager.setListener(null);
         if (downloadDialog != null) {
             downloadDialog.dismiss();
@@ -2609,7 +2634,18 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     }
 
     private void tap(View v) {
-        if (v != null) v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        if (v != null) {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            String label;
+            try {
+                label = getResources().getResourceEntryName(v.getId());
+            } catch (Exception e) {
+                // 弹窗里的按钮是代码建的，没有资源名：退回按钮文字，日志里照样看得懂
+                label = v instanceof TextView ? ((TextView) v).getText().toString()
+                        : "view#" + Integer.toHexString(v.getId());
+            }
+            DebugLog.op("点击 " + label);
+        }
     }
 
     private int dp(int v) {

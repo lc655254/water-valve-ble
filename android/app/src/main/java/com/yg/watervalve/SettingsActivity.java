@@ -38,6 +38,12 @@ public class SettingsActivity extends Activity {
         TextView version = findViewById(R.id.settingsVersion);
         if (version != null) version.setText("v" + Updater.currentVersion(this));
 
+        TextView device = findViewById(R.id.settingsDevice);
+        if (device != null) {
+            device.setText(android.os.Build.MODEL + " · Android " + android.os.Build.VERSION.RELEASE
+                    + " (" + android.os.Build.VERSION.SDK_INT + ")");
+        }
+
         View back = findViewById(R.id.btnBack);
         if (back != null) back.setOnClickListener(v -> finish());
 
