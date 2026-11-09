@@ -83,6 +83,16 @@
                     android:text="离线"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
+
+                <ImageView
+                    android:id="@+id/btnSettings"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_chip_light"
+                    android:contentDescription="设置"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_settings" />
             </LinearLayout>
 
             <LinearLayout
@@ -637,99 +647,6 @@
                             android:textIsSelectable="true"
                             android:textSize="10sp" />
                     </ScrollView>
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/appearanceCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:background="@drawable/bg_card"
-                android:elevation="1dp"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:letterSpacing="0.08"
-                        android:text="外观"
-                        android:textColor="@color/muted"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/themeName"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/muted"
-                        android:textSize="11sp" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginTop="12dp"
-                    android:background="@color/line" />
-
-                <LinearLayout
-                    android:id="@+id/themeSwatches"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:orientation="horizontal" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/btnCustomColor"
-                        android:layout_width="wrap_content"
-                        android:layout_height="34dp"
-                        android:background="@drawable/bg_button_ghost"
-                        android:gravity="center"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="14dp"
-                        android:text="自定义颜色"
-                        android:textColor="@color/primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/btnPickBg"
-                        android:layout_width="wrap_content"
-                        android:layout_height="34dp"
-                        android:layout_marginStart="8dp"
-                        android:background="@drawable/bg_button_ghost"
-                        android:gravity="center"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="14dp"
-                        android:text="选择背景图"
-                        android:textColor="@color/primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/btnClearBg"
-                        android:layout_width="wrap_content"
-                        android:layout_height="34dp"
-                        android:layout_marginStart="8dp"
-                        android:background="@drawable/bg_button_ghost"
-                        android:gravity="center"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="14dp"
-                        android:text="清除背景"
-                        android:textColor="@color/muted"
-                        android:textSize="11sp"
-                        android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>
 
