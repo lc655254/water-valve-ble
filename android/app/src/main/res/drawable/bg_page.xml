@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 页面背景：竖向浅渐变 + 右上/左侧两团柔光，卡片浮在上面有层次 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:endColor="@color/page_bottom"
+                android:startColor="@color/page_top"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item
+        android:width="300dp"
+        android:height="300dp"
+        android:gravity="top|end">
+        <shape android:shape="oval">
+            <gradient
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:endColor="@android:color/transparent"
+                android:gradientRadius="150dp"
+                android:startColor="@color/blob_1"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <item
+        android:width="240dp"
+        android:height="240dp"
+        android:gravity="top|start"
+        android:top="240dp">
+        <shape android:shape="oval">
+            <gradient
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:endColor="@android:color/transparent"
+                android:gradientRadius="120dp"
+                android:startColor="@color/blob_2"
+                android:type="radial" />
+        </shape>
+    </item>
+</layer-list>
