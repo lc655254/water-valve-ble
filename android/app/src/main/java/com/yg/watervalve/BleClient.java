@@ -72,6 +72,8 @@ public final class BleClient {
     private volatile int lastWriteStatus = -1;
     /** 这台设备/模块整帧长写连续失败几次：≥2 就只用分片，省掉每帧 3 秒空等 */
     private int wholeFailures;
+    /** 协商后的 MTU（默认 23，单个写包 20 字节） */
+    private volatile int thisMtu = 23;
     /** 长写能力记在 prefs 里，下次连同一块表不用再试 */
     private String wholeKey = "";
 
@@ -208,6 +210,7 @@ public final class BleClient {
             wholeKey = "";
         }
         wholeFailures = wholeKey.isEmpty() ? 0 : (blePrefs().getBoolean(wholeKey, false) ? 2 : 0);
+        thisMtu = 23;
         if (wholeFailures >= 2) DebugLog.line("ble", "这台表长写不通，直接用 20 字节分片");
         try {
             gatt = d.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE);
@@ -283,6 +286,14 @@ public final class BleClient {
                 writeChar.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
             }
             try {
+                // 先把 MTU 抬上去：默认 23 时 130B 的 21 帧只能分片写，
+                // 请求 247 之后整帧一次就发得出去（部分机型会拒绝，忽略即可）
+                boolean ok = g.requestMtu(247);
+                DebugLog.line("ble", "请求 MTU 247：" + ok);
+            } catch (Exception e) {
+                DebugLog.line("ble", "请求 MTU 失败：" + e);
+            }
+            try {
                 g.setCharacteristicNotification(notifyChar, true);
                 BluetoothGattDescriptor desc = notifyChar.getDescriptor(
                         UUID.fromString(Protocol.CCCD_UUID));
@@ -295,6 +306,12 @@ public final class BleClient {
             } catch (SecurityException e) {
                 listener.onConnected(false, "启用通知权限不足");
             }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt g, int mtu, int status) {
+            DebugLog.line("ble", "MTU 协商：mtu=" + mtu + " status=" + status);
+            if (status == BluetoothGatt.GATT_SUCCESS) thisMtu = mtu;
         }
 
         @Override
