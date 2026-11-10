@@ -1,6 +1,20 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.11）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.12）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.12 按云端实扣记账 + MTU 协商（2026-11-10）
+
+真机日志（淮安 / project 1036 / device 2263）里同一个账号连续两单：
+`rate1=325 → 账单 consumeMoney=0.325`、`rate1=3125 → 3.125`。也就是说这台云端**不看零用量**，
+按设备流水里的 `rate1` 照扣，而账本还写着「省 ¥0.325 / 省 ¥3.125」。
+
+- `Cloud.upload()` 把响应里的 `consumeMoney` 存到 `Cloud.lastConsumeMoney`；
+  `recordSession()` 拿到就按它记 `paid`，`saved` 归 0，并在 `note` 写「云端按量扣费，零用量未生效」
+- 下单前先 `Cloud.refreshBalance()`：上次结算断网（日志里 `UnknownHostException`）会让缓存余额过期，
+  「下单前 − 结算后」算成 `实扣 ¥-1.550`
+- `refreshBalanceAndNotify()` 增加 `lastRecordPaidPositive()` 判断，已经按云端金额记过就不再被余额差覆盖
+- `BleClient` 连接后 `requestMtu(247)`：默认 MTU 23 时 130B 的 21 帧写会回 `status=7`，
+  只能退回 20 字节分片；MTU 抬上去后整帧可发，日志新增 `[ble] MTU 协商：mtu=…`
 
 ## 0.12.11 实验开关不再卡住关阀（2026-11-10）
 
@@ -336,7 +350,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.11（versionCode 71），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.12（versionCode 72），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

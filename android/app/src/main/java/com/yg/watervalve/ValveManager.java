@@ -581,6 +581,18 @@ public final class ValveManager {
         }
         saveDevice();
 
+        // 下单前先刷一次余额：上次结算如果因为断网没刷到，缓存值就是旧的，
+        // 结算时用「下单前 − 结算后」算实扣会算错（实测出现过 −1.55）
+        try {
+            String pre = Cloud.refreshBalance(session);
+            if (pre != null && !pre.isEmpty()) {
+                session.balance = pre;
+                prefs.edit().putString("session", session.toJson().toString()).apply();
+                log("下单前余额：" + Cloud.fmtMoney(pre) + " 元");
+            }
+        } catch (Exception e) {
+            DebugLog.line("bal", "下单前刷新余额失败：" + msg(e));
+        }
         log("云端下单（预扣 5 元）…");
         Cloud.RateOrder ro = Cloud.rateOrder(session, devId, q.tacTimes, q.commMode, mac);
         // 记下单前的余额：结算后拿它和新余额比，就知道云端到底扣没扣钱
@@ -791,6 +803,7 @@ public final class ValveManager {
         String clData = null;
         boolean zeroRate = prefs.getBoolean("zero_rate", false);
         boolean rejected = false;
+        Cloud.lastConsumeMoney = -1;
         try {
             String xf = Protocol.zeroUsage(collectFull, zeroRate);
             log("零用量流水已生成（" + xf.length() / 2 + "B"
@@ -965,6 +978,15 @@ public final class ValveManager {
         DebugLog.line("settle", String.format(Locale.CHINA,
                 "结算计算 用量=%s%.3fL × %d 元/吨 = ¥%.4f → 起步价 ¥%.3f → 应扣 ¥%.4f",
                 estimated ? "约" : "", liters, rate, byUse, MIN_CHARGE_YUAN, charge));
+        // 云端上传接口自己报了实扣金额就按它记账：有些云端不看零用量，按设备流水里的
+        // rate1 照扣（实测 rate1=325 → 账单 consumeMoney=0.325），这时不能再说「省了」
+        double cloudCharge = Cloud.lastConsumeMoney;
+        double paidNow = cloudCharge > 0.0005 ? round4(cloudCharge) : 0;
+        if (paidNow > 0) {
+            charge = paidNow;
+            DebugLog.line("settle", String.format(Locale.CHINA,
+                    "云端实扣 ¥%.4f（零用量未生效，按设备流水计费）", paidNow));
+        }
         try {
             JSONObject rec = new JSONObject();
             rec.put("ts", end);
@@ -978,8 +1000,9 @@ public final class ValveManager {
             rec.put("liters", round3(liters));
             rec.put("rate", rate);
             rec.put("official", round4(charge));
-            rec.put("paid", 0.0);
-            rec.put("saved", round4(charge));
+            rec.put("paid", round4(paidNow));
+            rec.put("saved", round4(paidNow > 0 ? 0 : charge));
+            if (paidNow > 0) rec.put("note", "云端按量扣费，零用量未生效");
             rec.put("source", deviceLiters > 0.01 ? "device" : (estimated ? "estimate" : "count"));
             JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
             arr.put(rec);
@@ -987,9 +1010,10 @@ public final class ValveManager {
             prefs.edit().putString("ledger", arr.toString())
                     .putInt("order_use_count", -1).apply();
             log(String.format(Locale.CHINA,
-                    "账本：计数 %d（云端 %s）差值 %d → %s%.2f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥0 · 省 ¥%.3f",
+                    "账本：计数 %d（云端 %s）差值 %d → %s%.2f L · %d 秒 · %d 元/吨 · 官方 ¥%.3f · 实扣 ¥%.3f · 省 ¥%.3f",
                     count, cloudCount < 0 ? "无" : String.valueOf(cloudCount), delta,
-                    estimated ? "约 " : "", liters, seconds, rate, charge, charge));
+                    estimated ? "约 " : "", liters, seconds, rate, charge, paidNow,
+                    paidNow > 0 ? 0 : charge));
             lastOrderUseCount = -1;      // 这一单已经结掉，别带到下一单
             notifyStats();
         } catch (Exception e) {
@@ -1105,8 +1129,10 @@ public final class ValveManager {
                         Cloud.fmtMoney(bal),
                         balanceBeforeOrder < 0 ? "-"
                                 : String.format(Locale.CHINA, "%.3f", balanceBeforeOrder)));
-                // 零用量结算本该不扣钱：真扣了就如实记账，别在账本里假报「省了多少」
-                if (before >= 0 && after >= 0) {
+                // 零用量结算本该不扣钱：真扣了就如实记账，别在账本里假报「省了多少」。
+                // 但如果 recordSession 已经用过上传接口报的 consumeMoney，就不要再用
+                // 余额差覆盖一遍（余额缓存偶尔会旧，会把实扣算成负数）。
+                if (before >= 0 && after >= 0 && !lastRecordPaidPositive()) {
                     double paid = round3(before - after);
                     DebugLog.line("bal", String.format(Locale.CHINA,
                             "实扣 ¥%.3f（%s）", paid,
@@ -1229,6 +1255,18 @@ public final class ValveManager {
             }
         }
         return 0;
+    }
+
+    /** 账本最后一笔是不是已经记过实扣（>0）：记过就别再用余额差覆盖 */
+    private boolean lastRecordPaidPositive() {
+        try {
+            JSONArray arr = new JSONArray(prefs.getString("ledger", "[]"));
+            if (arr.length() == 0) return false;
+            JSONObject r = arr.optJSONObject(arr.length() - 1);
+            return r != null && r.optDouble("paid", 0) > 0.0005;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 云端真扣了钱：把最后一笔账本改成「实扣」，省下的钱归零 */

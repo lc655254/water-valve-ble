@@ -16,6 +16,9 @@ import java.util.Map;
 
 /** 凯路云接口：短信登录、BLE 下单、零用量流水上传。 */
 public final class Cloud {
+    /** 最近一次上传云端返回的实扣金额（元）；-1 表示没拿到 */
+    public static volatile double lastConsumeMoney = -1;
+
     public static final String BASE = "https://v3-api.china-qzxy.cn";
 
     /** 调试用：把接口指到本地假云端（靶机），空串表示用真实地址 */
@@ -322,7 +325,11 @@ public final class Cloud {
                 throw new ApiException(code, d.optString("errorMessage", "上传失败"));
             }
             JSONObject data = d.optJSONObject("data");
-            if (data != null) DebugLog.line("bill", "上传返回 data：" + Usage.dump(data));
+            if (data != null) {
+                DebugLog.line("bill", "上传返回 data：" + Usage.dump(data));
+                // 云端这次到底扣了多少（元）：有些云端不看零用量，按设备流水里的 rate1 扣
+                lastConsumeMoney = data.optDouble("consumeMoney", -1);
+            }
             return data == null ? null : data.optString("clData", null);
         }
         throw new ApiException(531, "上传连续被限流");
