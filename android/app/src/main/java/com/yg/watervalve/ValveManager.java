@@ -496,6 +496,14 @@ public final class ValveManager {
         });
     }
 
+    /** 把一帧 23 的解析结果推给界面；结算轮询里的查询也要推，否则状态会停在「结算中」 */
+    private void publishQuery(Protocol.Query q) {
+        if (q == null) return;
+        main.post(() -> {
+            if (listener != null) listener.onQuery(q);
+        });
+    }
+
     private void queryInternal() throws Exception {
         Protocol.Query q = ble.queryStatus();
         if (!"80".equals(q.returnCode)) {
@@ -892,9 +900,12 @@ public final class ValveManager {
                 Protocol.Query q = ble.queryStatus();
                 if ("00".equals(q.onCharge)) {
                     log("结算完成，设备已回空闲");
+                    // 把最后这帧 23 也推给界面：否则状态还停在上一次的「结算中」
+                    publishQuery(q);
                     return true;
                 }
                 log("确认 onCharge=" + q.onCharge + "，继续等待…");
+                publishQuery(q);
             } catch (Exception ignored) {
             }
         }
