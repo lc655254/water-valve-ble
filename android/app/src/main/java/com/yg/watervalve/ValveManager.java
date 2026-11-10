@@ -123,6 +123,8 @@ public final class ValveManager {
     private double balanceBeforeOrder = -1;
     /** 最近一次连接失败的原因（GATT 状态 / 超时），给界面弹「连不上怎么办」用 */
     private volatile String lastConnectError = "";
+    /** 正在续期会话，避免 errorCode=8 连环触发 */
+    private volatile boolean renewing;
 
     private ValveManager(Context ctx) {
         context = ctx;
@@ -152,15 +154,32 @@ public final class ValveManager {
         Cloud.watchSession(this::onSessionExpired);
     }
 
-    /** 会话失效：清掉本地 session，界面会回到登录页 */
+    /** 会话失效：先静默续期一次，续不上再清会话、回登录页 */
     private void onSessionExpired() {
-        if (session == null) return;
-        session = null;
-        prefs.edit().remove("session").apply();
-        DebugLog.line("session", "云端回 errorCode=8（登录失效），已清除本地会话");
-        log("登录已失效，请重新登录");
-        main.post(() -> {
-            if (listener != null) listener.onSession(null);
+        final Cloud.Session s = session;
+        if (s == null || renewing) return;
+        renewing = true;
+        io.execute(() -> {
+            try {
+                Cloud.Session n = Cloud.renew(s);
+                session = n;
+                prefs.edit().putString("session", n.toJson().toString()).apply();
+                DebugLog.line("session", "会话续期成功，loginCode 已更新");
+                log("登录状态已自动续期");
+                main.post(() -> {
+                    if (listener != null) listener.onSession(n);
+                });
+            } catch (Exception e) {
+                session = null;
+                prefs.edit().remove("session").apply();
+                DebugLog.line("session", "续期失败（" + msg(e) + "），清除本地会话");
+                log("登录已失效，请重新登录");
+                main.post(() -> {
+                    if (listener != null) listener.onSession(null);
+                });
+            } finally {
+                renewing = false;
+            }
         });
     }
 
@@ -770,8 +789,9 @@ public final class ValveManager {
         log("结算参数：randomNumber 候选 " + rns + " · commMode=" + cm);
 
         String clData = null;
+        boolean zeroRate = prefs.getBoolean("zero_rate", false);
+        boolean rejected = false;
         try {
-            boolean zeroRate = prefs.getBoolean("zero_rate", false);
             String xf = Protocol.zeroUsage(collectFull, zeroRate);
             log("零用量流水已生成（" + xf.length() / 2 + "B"
                     + (zeroRate ? " · 费率也清零" : "") + "）");
@@ -786,9 +806,44 @@ public final class ValveManager {
                         break;
                     }
                 } catch (Exception e) {
+                    if (msg(e).contains("226")) rejected = true;
                     log("上传失败（" + rn + "）：" + msg(e));
                     try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
                 }
+            }
+            // 实验开关（费率也清零）被云端判 226 时，绝不能就这么放着：
+            // 没有 clearCode 就关不了阀，用户会一直放水。立刻退回标准零用量再传一次。
+            if (clData == null && zeroRate) {
+                log("实验开关被云端拒绝（226），改用标准零用量上传（保留费率）");
+                DebugLog.line("settle", "zero_rate 被拒，回退标准零用量");
+                String std = Protocol.zeroUsage(collectFull, false);
+                for (String rn : rns) {
+                    try {
+                        clData = Cloud.upload(session, std, rn, cm);
+                        if (clData != null && !clData.isEmpty()) {
+                            lastRn = rn;
+                            rememberRn(rn);
+                            saveDevice();
+                            log("回退上传成功，randomNumber=" + rn);
+                            break;
+                        }
+                    } catch (Exception e) {
+                        log("回退上传失败（" + rn + "）：" + msg(e));
+                        try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                    }
+                }
+                if (clData != null && !clData.isEmpty()) {
+                    // 这台设备的云端不吃「费率清零」：记两次就直接把开关关掉，免得下次又卡住
+                    int fails = prefs.getInt("zero_rate_fail", 0) + 1;
+                    prefs.edit().putInt("zero_rate_fail", fails).apply();
+                    if (fails >= 2) {
+                        prefs.edit().putBoolean("zero_rate", false)
+                                .putInt("zero_rate_fail", 0).apply();
+                        log("这台设备的云端拒绝费率清零，已自动关闭实验开关");
+                    }
+                }
+            } else if (rejected && !zeroRate) {
+                DebugLog.line("settle", "标准零用量也被判 226");
             }
         } catch (Exception e) {
             log("零用量上传失败：" + msg(e));
@@ -1021,6 +1076,16 @@ public final class ValveManager {
         main.post(() -> {
             if (listener != null) listener.onConnection(connected);
         });
+    }
+
+    /** 给界面用：主动刷一次余额（充值回来、下拉刷新之类） */
+    public void refreshBalanceOnce() {
+        io.execute(this::refreshBalanceAndNotify);
+    }
+
+    /** 给界面用：主动续期一次会话 */
+    public void renewSession() {
+        onSessionExpired();
     }
 
     private void refreshBalanceAndNotify() {

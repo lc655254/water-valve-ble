@@ -17,6 +17,20 @@ import java.util.Map;
 /** 凯路云接口：短信登录、BLE 下单、零用量流水上传。 */
 public final class Cloud {
     public static final String BASE = "https://v3-api.china-qzxy.cn";
+
+    /** 调试用：把接口指到本地假云端（靶机），空串表示用真实地址 */
+    private static volatile String baseOverride = "";
+
+    public static void setBaseOverride(String base) {
+        String b = base == null ? "" : base.trim();
+        if (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        baseOverride = b;
+    }
+
+    public static String base() {
+        String b = baseOverride;
+        return b == null || b.isEmpty() ? BASE : b;
+    }
     private static final String UA = "okhttp/4.2.2";
     private static final int BIG_TYPE_ID = 4;
     private static final int SMALL_TYPE_ID = 1;
@@ -227,6 +241,41 @@ public final class Cloud {
     }
 
     /**
+     * 会话续期（官方 App 用的 /user/login/cache/renewal）：
+     * 成功返回带新 loginCode 的 Session，失败抛异常。拿不到新 code 就沿用旧的。
+     */
+    public static Session renew(Session s) throws Exception {
+        if (s == null) throw new ApiException(-1, "还没登录");
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("loginCode", s.loginCode);
+        p.put("userId", s.userId);
+        p.put("accountId", s.accountId);
+        p.put("projectId", s.projectId);
+        p.put("telephone", s.telephone);
+        p.put("phoneSystem", "ios");
+        p.put("version", "6.5.26");
+        JSONObject d = postForm("/user/login/cache/renewal", p);
+        int code = d.optInt("errorCode", -1);
+        if (code != 0) throw new ApiException(code, d.optString("errorMessage", "续期失败"));
+        String fresh = "";
+        JSONObject data = d.optJSONObject("data");
+        if (data != null) {
+            fresh = data.optString("loginCode", "");
+            if (fresh.isEmpty()) fresh = data.optString("token", "");
+        }
+        if (fresh.isEmpty()) fresh = d.optString("loginCode", "");
+        Session n = new Session();
+        n.loginCode = fresh.isEmpty() ? s.loginCode : fresh;
+        n.userId = s.userId;
+        n.projectId = s.projectId;
+        n.accountId = s.accountId;
+        n.telephone = s.telephone;
+        n.userName = s.userName;
+        n.balance = s.balance;
+        return n;
+    }
+
+    /**
      * 本月云端账单（只读）。消费单在 consumeBillDTO 里，金额单位是元。
      * 用来核对「零用量上传之后云端到底扣没扣钱」。
      */
@@ -287,7 +336,7 @@ public final class Cloud {
             q.append('=');
             q.append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), "UTF-8"));
         }
-        String url = BASE + path + (q.length() > 0 ? "?" + q : "");
+        String url = base() + path + (q.length() > 0 ? "?" + q : "");
         return request("GET", url, null);
     }
 
@@ -299,7 +348,7 @@ public final class Cloud {
             body.append('=');
             body.append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), "UTF-8"));
         }
-        return request("POST", BASE + path, body.toString());
+        return request("POST", base() + path, body.toString());
     }
 
     private static JSONObject request(String method, String url, String body) throws Exception {

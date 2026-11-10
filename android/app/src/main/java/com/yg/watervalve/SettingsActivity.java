@@ -29,6 +29,9 @@ public class SettingsActivity extends Activity {
     /** 导出时先把合并好的文本放这里，用户选完保存位置再写盘。 */
     private String pendingLog;
 
+    /** 去官方充值页的时间：回来后自动刷一次余额 */
+    private long rechargeAt;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -92,6 +95,19 @@ public class SettingsActivity extends Activity {
         if (billsBtn != null) billsBtn.setOnClickListener(v -> {
             DebugLog.op("查看本月账单");
             showBills();
+        });
+
+        View recharge = findViewById(R.id.settingsRecharge);
+        if (recharge != null) recharge.setOnClickListener(v -> {
+            DebugLog.op("打开官方充值页");
+            try {
+                Intent i = new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://app-cold-water.china-qzxy.cn/"));
+                startActivity(i);
+                rechargeAt = System.currentTimeMillis();
+            } catch (Exception e) {
+                toast("打不开浏览器：" + e.getMessage());
+            }
         });
 
         // 实验开关：零用量时连费率一起清零
@@ -162,6 +178,94 @@ public class SettingsActivity extends Activity {
         }
         View customBtn = findViewById(R.id.btnCustomColor);
         if (customBtn != null) customBtn.setOnClickListener(v -> showCustomColorDialog());
+    }
+
+    // ── 靶机：接口地址 ──────────────────────────────────────
+    private void paintApiBase(TextView v) {
+        String b = getSharedPreferences("water_valve", MODE_PRIVATE).getString("api_base", "");
+        if (b == null) b = "";
+        v.setText(b.isEmpty() ? "默认" : b.replace("https://", "").replace("http://", ""));
+    }
+
+    /** 把接口地址指到本地假云端（靶机）；留空即回官方 */
+    private void showApiBaseDialog(final TextView label) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(14));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+
+        TextView title = new TextView(this);
+        title.setText("接口地址（靶机）");
+        title.setTextSize(17);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(getColor(R.color.ink));
+        box.addView(title);
+
+        TextView note = new TextView(this);
+        note.setText("填 http://电脑IP:8000 指向本地假云端；留空回官方地址。改完重启生效。");
+        note.setTextSize(12);
+        note.setLineSpacing(dp(2), 1f);
+        note.setTextColor(getColor(R.color.muted));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(10);
+        box.addView(note, nlp);
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(getSharedPreferences("water_valve", MODE_PRIVATE).getString("api_base", ""));
+        input.setHint("http://192.168.1.10:8000");
+        input.setTextSize(14);
+        input.setTextColor(getColor(R.color.ink));
+        input.setBackgroundResource(R.drawable.bg_input);
+        input.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
+        ilp.topMargin = dp(12);
+        box.addView(input, ilp);
+
+        TextView ok = new TextView(this);
+        ok.setText("保存");
+        ok.setTextSize(14);
+        ok.setGravity(android.view.Gravity.CENTER);
+        ok.setTextColor(getColor(R.color.primary));
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        olp.topMargin = dp(12);
+        box.addView(ok, olp);
+        ok.setOnClickListener(v -> {
+            String url = input.getText().toString().trim();
+            getSharedPreferences("water_valve", MODE_PRIVATE)
+                    .edit().putString("api_base", url).apply();
+            Cloud.setBaseOverride(url);
+            DebugLog.op("接口地址改为：" + (url.isEmpty() ? "官方" : url));
+            dialog.dismiss();
+            paintApiBase(label);
+            toast(url.isEmpty() ? "已改回官方地址" : "已指向 " + url);
+        });
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(13);
+        cancel.setTextColor(getColor(R.color.muted));
+        cancel.setGravity(android.view.Gravity.CENTER);
+        box.addView(cancel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+        cancel.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setContentView(box);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.show();
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            w.setDimAmount(0.35f);
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.88f),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     // ── 计费自检 ────────────────────────────────────────────
@@ -302,6 +406,12 @@ public class SettingsActivity extends Activity {
         final TextView status = findViewById(R.id.debugStatus);
         paintDebug(sw, state, DebugLog.isOn());
         if (status != null) status.setText(DebugLog.stats());
+
+        final TextView apiBase = findViewById(R.id.settingsApiBase);
+        if (apiBase != null) {
+            paintApiBase(apiBase);
+            apiBase.setOnClickListener(v -> showApiBaseDialog(apiBase));
+        }
 
         if (sw != null) sw.setOnClickListener(v -> {
             boolean now = !DebugLog.isOn();
@@ -622,6 +732,12 @@ public class SettingsActivity extends Activity {
         FullScreen.hideBars(this);
         // 换完主题/背景图立刻生效（取消对话框、返回本页都能看到）
         Appearance.apply(this);
+        // 从官方充值页回来：自动刷一次余额
+        if (rechargeAt > 0 && System.currentTimeMillis() - rechargeAt > 3000) {
+            rechargeAt = 0;
+            ValveManager.get(this).refreshBalanceOnce();
+            toast("已刷新余额");
+        }
     }
 
     @Override

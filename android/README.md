@@ -1,6 +1,18 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.8）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.11）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.11 实验开关不再卡住关阀（2026-11-10）
+
+成都现场日志（project 225 / `rate1=180 rate2=60`）：打开「零用量连费率一起清零」后，
+云端对这条流水一律回 `226 加密校验失败`，拿不到 `clearCode`，86 的 12 个变体全回 81，
+设备停在 `onCharge=03`，阀关不上，App 每 50 秒重试一次。
+
+- `settleInternal()` 现在：`zero_rate` 上传失败时**立刻回退标准零用量**（保留费率）再传一轮，
+  拿到 `clearCode` 后正常 86 清账，不再让实验开关挡住关阀
+- 同一台设备连续两次被拒，自动把 `zero_rate` 关掉并提示（`zero_rate_fail` 计数）
+- 设置里的说明同步改成「有些云端会判 226，这时会自动退回，不会卡住关阀」
+- 公开版 `usesCleartextTraffic` 保持 `false`（靶机调试版另存，不进 release）
 
 ## 0.12.8 账单页：看清钱怎么扣、怎么加（2026-11-10）
 
@@ -324,7 +336,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.8（versionCode 68），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.11（versionCode 71），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

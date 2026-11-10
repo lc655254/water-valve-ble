@@ -206,7 +206,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:lineSpacingExtra="2dp"
-                    android:text="个别设备/云端把扣费金额放在费率字段里，只清用量仍会扣钱。打开后连费率一起清；62B 固件可能被服务端判 226，遇到就关掉。"
+                    android:text="个别设备/云端把扣费金额放在费率字段里，只清用量仍会扣钱。打开后连费率一起清；有些云端会判 226，这时会自动退回标准零用量上传，不会卡住关阀。"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
 
@@ -341,6 +341,31 @@
                     android:layout_marginTop="10dp"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="接口地址（靶机用）"
+                        android:textColor="@color/ink"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/settingsApiBase"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:maxWidth="200dp"
+                        android:text="默认"
+                        android:textColor="@color/primary"
+                        android:textSize="12sp" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -496,6 +521,29 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="看消费 / 充值记录"
+                        android:textColor="@color/primary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="充值"
+                        android:textColor="@color/ink"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/settingsRecharge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="去官方充值"
                         android:textColor="@color/primary"
                         android:textSize="13sp" />
                 </LinearLayout>
