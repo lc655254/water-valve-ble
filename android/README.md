@@ -1,6 +1,17 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.12）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.13）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.13 关水后状态不再卡「结算中」（2026-11-11）
+
+`renderWaterStatus()` 的状态来自 `lastOnCharge`，而它只在 `queryInternal()` 走
+`listener.onQuery()` 时更新。结算轮询（`settleInternal` 里那 5 次 `ble.queryStatus()`）
+从来不走这条路 —— 最后那帧 `onCharge=00` 只打了日志，界面收不到，所以关水成功后
+状态还挂在「已连接 · 结算中」。
+
+- 新增 `ValveManager.publishQuery(q)`：结算轮询的每一帧 23 都推给界面
+- `MainActivity.onWater(false)` 里把 `lastOnCharge` 复位成 `00`（关水成功即空闲）
+- 「水表在结算中」的 toast 只在手动查询时弹（`!running`），结算过程不再反复弹
 
 ## 0.12.12 按云端实扣记账 + MTU 协商（2026-11-10）
 
@@ -350,7 +361,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.12（versionCode 72），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.13（versionCode 73），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

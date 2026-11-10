@@ -2433,6 +2433,8 @@ public class MainActivity extends Activity implements ValveManager.Listener {
     public void onWater(boolean running) {
         final int sy = scroll == null ? 0 : scroll.getScrollY();
         this.running = running;
+        // 关水利落完了：状态别还挂着上一次查询的「结算中」
+        if (!running) lastOnCharge = "00";
         btnWater.setText(running ? "关水" : "开水");
         styleWaterButton(running);
         btnWater.animate().cancel();
@@ -2550,7 +2552,7 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         lastOnCharge = q.onCharge == null ? "" : q.onCharge;
         renderWaterStatus();
         renderDevice();
-        if ("03".equals(lastOnCharge)) {
+        if ("03".equals(lastOnCharge) && !running) {
             toast("水表在结算中：点「开水」会自动先补结算");
         }
     }
