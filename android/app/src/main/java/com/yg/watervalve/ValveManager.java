@@ -195,6 +195,33 @@ public final class ValveManager {
     public String getDeviceName() { return deviceName; }
     public boolean isRunning() { return running; }
 
+    /** 金额上限（元），0 = 不限制 */
+    public double budgetYuan() {
+        return prefs.getFloat("budget_yuan", 0f);
+    }
+
+    /** 按当前流速和下单费率估算这一单已经花了多少（元） */
+    public double estimateCost() {
+        if (!running || openTs <= 0) return 0;
+        int sec = (int) Math.max(0, (System.currentTimeMillis() - openTs) / 1000);
+        double rate = lastRateOrder > 0 ? lastRateOrder
+                : (lastFlow != null && lastFlow.rate2I > 0 ? lastFlow.rate2I : 25);
+        double liters = sec / 60.0 * flowLpm();
+        return round4(liters * rate / 1000.0);
+    }
+
+    /** 界面每 5 秒调一次：超过金额上限就自动关水 */
+    public void checkBudget() {
+        if (!running) return;
+        double cap = budgetYuan();
+        if (cap <= 0) return;
+        double cost = estimateCost();
+        if (cost >= cap) {
+            log(String.format(Locale.CHINA, "已达金额上限 ¥%.2f（当前约 ¥%.2f），自动关水", cap, cost));
+            close("金额上限");
+        }
+    }
+
     /**
      * 退到后台一段时间后把连接放掉：BLE 水表同时只容一台设备，
      * 手机挂着不放，电脑版就会一直连不上（现场反馈的头号原因）。
@@ -835,11 +862,13 @@ public final class ValveManager {
         boolean zeroRate = prefs.getBoolean("zero_rate", false);
         Cloud.lastConsumeMoney = -1;
         // 尝试顺序：上次成功的模式 → 只清金额(1) →（开关开着时）金额+单价(2) → 标准(0)
+        // 云端一旦对「清金额」判过 226，就记住这台表不吃这套，之后直接走标准，别每次白试
         java.util.LinkedHashSet<Integer> modes = new java.util.LinkedHashSet<>();
         int okMode = prefs.getInt("zero_mode_ok", -1);
+        boolean unsupported = prefs.getBoolean("zero_rate_unsupported", false);
         if (okMode > 0) modes.add(okMode);
-        modes.add(1);
-        if (zeroRate) modes.add(2);
+        if (!unsupported) modes.add(1);
+        if (zeroRate && !unsupported) modes.add(2);
         modes.add(0);
         try {
             for (int mode : modes) {
@@ -869,6 +898,14 @@ public final class ValveManager {
                         }
                     } catch (Exception e) {
                         log("上传失败（" + tag + " / " + rn + "）：" + msg(e));
+                        if (mode > 0 && msg(e).contains("226")) {
+                            // 云端校验了流水里的金额，清金额这条路走不通：
+                            // 记下来，之后直接走标准上传，免得每次关水都白等一轮
+                            prefs.edit().putBoolean("zero_rate_unsupported", true)
+                                    .putBoolean("zero_rate", false)
+                                    .putInt("zero_mode_ok", 0).apply();
+                            DebugLog.line("settle", "云端对清金额判 226，标记 zero_rate_unsupported");
+                        }
                         try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
                     }
                 }

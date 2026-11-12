@@ -268,8 +268,109 @@ public class SettingsActivity extends Activity {
         }
     }
 
+    // ── 金额上限 ────────────────────────────────────────────
+    private void paintBudget(TextView v) {
+        float cap = getSharedPreferences("water_valve", MODE_PRIVATE)
+                .getFloat("budget_yuan", 0f);
+        v.setText(cap <= 0 ? "不限制"
+                : String.format(Locale.CHINA, "¥%.2f", cap));
+    }
+
+    private void showBudgetDialog(final TextView label) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(20), dp(22), dp(14));
+        box.setBackgroundResource(R.drawable.bg_dialog);
+
+        TextView title = new TextView(this);
+        title.setText("金额上限（元）");
+        title.setTextSize(17);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(getColor(R.color.ink));
+        box.addView(title);
+
+        TextView note = new TextView(this);
+        note.setText("放水时每 5 秒估算一次花费，到上限自动关水。填 0 表示不限制。");
+        note.setTextSize(12);
+        note.setTextColor(getColor(R.color.muted));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(8);
+        box.addView(note, nlp);
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        float cap = getSharedPreferences("water_valve", MODE_PRIVATE)
+                .getFloat("budget_yuan", 0f);
+        input.setText(cap <= 0 ? "" : String.format(Locale.CHINA, "%.2f", cap));
+        input.setHint("0 = 不限制");
+        input.setTextSize(15);
+        input.setTextColor(getColor(R.color.ink));
+        input.setBackgroundResource(R.drawable.bg_input);
+        input.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
+        ilp.topMargin = dp(12);
+        box.addView(input, ilp);
+
+        TextView ok = new TextView(this);
+        ok.setText("保存");
+        ok.setTextSize(14);
+        ok.setGravity(android.view.Gravity.CENTER);
+        ok.setTextColor(getColor(R.color.primary));
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        olp.topMargin = dp(10);
+        box.addView(ok, olp);
+        ok.setOnClickListener(v -> {
+            float value = 0f;
+            try {
+                String s = input.getText().toString().trim();
+                if (!s.isEmpty()) value = Float.parseFloat(s);
+            } catch (Exception ignored) {
+            }
+            if (value < 0) value = 0f;
+            getSharedPreferences("water_valve", MODE_PRIVATE)
+                    .edit().putFloat("budget_yuan", value).apply();
+            DebugLog.op("金额上限改为：" + value);
+            dialog.dismiss();
+            paintBudget(label);
+            toast(value <= 0 ? "已关闭金额上限" : String.format(Locale.CHINA, "到 ¥%.2f 自动关水", value));
+        });
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(13);
+        cancel.setTextColor(getColor(R.color.muted));
+        cancel.setGravity(android.view.Gravity.CENTER);
+        box.addView(cancel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+        cancel.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setContentView(box);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.show();
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            w.setDimAmount(0.35f);
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.88f),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
     // ── 计费自检 ────────────────────────────────────────────
     private void setupBilling() {
+        final TextView budget = findViewById(R.id.settingsBudget);
+        if (budget != null) {
+            paintBudget(budget);
+            budget.setOnClickListener(v -> showBudgetDialog(budget));
+        }
         View check = findViewById(R.id.btnBillingCheck);
         if (check != null) check.setOnClickListener(v -> {
             DebugLog.op("计费自检：查云端账单");

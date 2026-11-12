@@ -2142,7 +2142,10 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         String text;
         int color;
         if (running) {
-            text = connected ? "放水中 · 点下面按钮关水"
+            String extra = String.format(java.util.Locale.CHINA, " · 约 ¥%.2f", manager.estimateCost());
+            double cap = manager.budgetYuan();
+            if (cap > 0) extra += String.format(java.util.Locale.CHINA, " / 上限 ¥%.2f", cap);
+            text = connected ? "放水中" + extra + " · 点下面按钮关水"
                     : "放水中 · 连接已断开，正在自动恢复…";
             color = connected ? R.color.primary : R.color.danger;
         } else if (!connected) {
@@ -2435,6 +2438,9 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         this.running = running;
         // 关水利落完了：状态别还挂着上一次查询的「结算中」
         if (!running) lastOnCharge = "00";
+        // 放水时每 5 秒刷一次「已用金额」，到上限自动关水
+        uiHandler.removeCallbacks(budgetTask);
+        if (running) uiHandler.postDelayed(budgetTask, 5000);
         btnWater.setText(running ? "关水" : "开水");
         styleWaterButton(running);
         btnWater.animate().cancel();
@@ -2636,9 +2642,19 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         DebugLog.op("界面进入后台（onPause）");
     }
 
+    /** 放水时每 5 秒刷一次「已花多少钱」，到上限自动关水 */
+    private final Runnable budgetTask = new Runnable() {
+        @Override
+        public void run() {
+            if (!running || isFinishing()) return;
+            manager.checkBudget();
+            renderWaterStatus();
+            uiHandler.postDelayed(this, 5000);
+        }
+    };
+
     /** 退到后台 20 秒还没放水：把 BLE 连接放掉，别占着让电脑版连不上 */
-    private final Runnable releaseBleTask = () -> {
-        if (manager != null && !running && !manager.hasOpenSession()) {
+    private final Runnable releaseBleTask = () -> {        if (manager != null && !running && !manager.hasOpenSession()) {
             manager.releaseBle("退到后台 20 秒");
         }
     };
