@@ -2636,6 +2636,28 @@ public class MainActivity extends Activity implements ValveManager.Listener {
         DebugLog.op("界面进入后台（onPause）");
     }
 
+    /** 退到后台 20 秒还没放水：把 BLE 连接放掉，别占着让电脑版连不上 */
+    private final Runnable releaseBleTask = () -> {
+        if (manager != null && !running && !manager.hasOpenSession()) {
+            manager.releaseBle("退到后台 20 秒");
+        }
+    };
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        uiHandler.removeCallbacks(releaseBleTask);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (manager != null && !running && !manager.hasOpenSession()) {
+            uiHandler.removeCallbacks(releaseBleTask);
+            uiHandler.postDelayed(releaseBleTask, 20000);
+        }
+    }
+
     @Override
     protected void onDestroy() {
         DebugLog.op("界面销毁（onDestroy）");

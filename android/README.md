@@ -1,6 +1,16 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.13）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.14）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.14 退到后台放掉连接（2026-11-11）
+
+BLE 外设同一时间只容一台中心设备。手机 App 退到后台后 GATT 还挂着，电脑版就一直「连不上」——
+现场反馈的「手机能连、电脑连不上」基本是这一条。
+
+- `ValveManager.releaseBle()`：没在放水、也没有未关会话时关闭 GATT 并通知界面
+- `MainActivity` 在 `onStop` 后延迟 20 秒执行（`onStart` 取消），短暂切个 App 不会断；正在放水或有
+  `safetyOpen` 时跳过
+- 回到前台重新扫描即可，连接建立很快
 
 ## 0.12.13 关水后状态不再卡「结算中」（2026-11-11）
 
@@ -361,7 +371,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.13（versionCode 73），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.14（versionCode 74），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
