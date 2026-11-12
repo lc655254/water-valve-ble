@@ -10,8 +10,8 @@ android {
         applicationId "com.yg.watervalve"
         minSdk 26
         targetSdk 35
-        versionCode 74
-        versionName "0.12.14"
+        versionCode 75
+        versionName "0.12.15"
     }
 
     buildTypes {

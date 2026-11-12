@@ -1099,11 +1099,12 @@ public final class ValveManager {
             else if ("count".equals(src)) mark = "（计数）";
             else mark = "（约）";
             String ltxt = String.format(Locale.CHINA, "%.3f L%s", l, mark);
+            double paid = last == null ? 0 : last.optDouble("paid", 0);
             // 金额优先：跟 Windows 版一致，先给「省了多少钱」，用量放后面
             return String.format(Locale.CHINA,
-                    "本次：省 ¥%.3f · %d 秒 · %s（官方应扣 ¥%.3f · 实扣 ¥0）\n"
+                    "本次：省 ¥%.3f · %d 秒 · %s（官方应扣 ¥%.3f · 实扣 ¥%.3f）\n"
                             + "累计：省 ¥%.3f · %d 次 · %.3f L",
-                    s, sec, ltxt, off, saved, arr.length(), liters);
+                    s, sec, ltxt, off, paid, saved, arr.length(), liters);
         } catch (Exception e) {
             return "账本：读取失败";
         }

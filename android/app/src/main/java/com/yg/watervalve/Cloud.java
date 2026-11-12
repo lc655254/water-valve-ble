@@ -327,12 +327,29 @@ public final class Cloud {
             JSONObject data = d.optJSONObject("data");
             if (data != null) {
                 DebugLog.line("bill", "上传返回 data：" + Usage.dump(data));
-                // 云端这次到底扣了多少（元）：有些云端不看零用量，按设备流水里的 rate1 扣
-                lastConsumeMoney = data.optDouble("consumeMoney", -1);
+                // 云端这次到底扣了多少：这个接口的金额是「厘」（5000 = 5 元），
+                // 账单列表那边才是「元」（"3.125"）。整数一律按厘换算，带小数按元。
+                lastConsumeMoney = moneyYuan(data.opt("consumeMoney"));
+                DebugLog.line("bill", "云端实扣原始值=" + data.opt("consumeMoney")
+                        + " → " + lastConsumeMoney + " 元");
             }
             return data == null ? null : data.optString("clData", null);
         }
         throw new ApiException(531, "上传连续被限流");
+    }
+
+    /** 云端金额字段：整数是「厘」，带小数是「元」；解析不了返回 -1 */
+    static double moneyYuan(Object v) {
+        if (v == null || v == JSONObject.NULL) return -1;
+        if (v instanceof Number) return ((Number) v).doubleValue() / 1000.0;
+        String s = String.valueOf(v).trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) return -1;
+        try {
+            double d = Double.parseDouble(s);
+            return s.contains(".") ? d : d / 1000.0;
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     private static JSONObject get(String path, Map<String, String> params) throws Exception {
