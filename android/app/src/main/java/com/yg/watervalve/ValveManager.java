@@ -194,6 +194,29 @@ public final class ValveManager {
     public String getMac() { return mac; }
     public String getDeviceName() { return deviceName; }
     public boolean isRunning() { return running; }
+
+    /**
+     * 退到后台一段时间后把连接放掉：BLE 水表同时只容一台设备，
+     * 手机挂着不放，电脑版就会一直连不上（现场反馈的头号原因）。
+     */
+    public void releaseBle(final String reason) {
+        if (running || safetyOpen) {
+            DebugLog.line("ble", "后台释放跳过：" + reason + "（正在放水/有未关会话）");
+            return;
+        }
+        if (!ble.isReady()) return;
+        io.execute(() -> {
+            try {
+                ble.close();
+                DebugLog.line("ble", "后台释放连接：" + reason);
+                log("已释放水表连接（" + reason + "），下次用之前重新扫描");
+                setBusy(false, "");
+                notifyConnection(false);
+            } catch (Exception e) {
+                DebugLog.line("ble", "释放连接失败：" + msg(e));
+            }
+        });
+    }
     public boolean isBusy() { return busy; }
     public boolean isConnected() { return ble.isReady(); }
     public boolean hasOpenSession() { return safetyOpen; }
