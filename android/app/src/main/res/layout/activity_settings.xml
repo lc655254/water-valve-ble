@@ -206,7 +206,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:lineSpacingExtra="2dp"
-                    android:text="个别设备/云端把扣费金额放在费率字段里，只清用量仍会扣钱。打开后连费率一起清；有些云端会判 226，这时会自动退回标准零用量上传，不会卡住关阀。"
+                    android:text="云端按流水里的扣费金额（rate1）记账，只清用量仍会扣钱。关水时会先试「只清金额」，被拒（226）再试「金额+单价全清」，都不行才走标准上传 —— 不会卡住关阀。打开这个开关会连单价一起试。"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
 

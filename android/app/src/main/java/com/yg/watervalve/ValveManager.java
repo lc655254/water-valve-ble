@@ -833,61 +833,59 @@ public final class ValveManager {
 
         String clData = null;
         boolean zeroRate = prefs.getBoolean("zero_rate", false);
-        boolean rejected = false;
         Cloud.lastConsumeMoney = -1;
+        // 尝试顺序：上次成功的模式 → 只清金额(1) →（开关开着时）金额+单价(2) → 标准(0)
+        java.util.LinkedHashSet<Integer> modes = new java.util.LinkedHashSet<>();
+        int okMode = prefs.getInt("zero_mode_ok", -1);
+        if (okMode > 0) modes.add(okMode);
+        modes.add(1);
+        if (zeroRate) modes.add(2);
+        modes.add(0);
         try {
-            String xf = Protocol.zeroUsage(collectFull, zeroRate);
-            log("零用量流水已生成（" + xf.length() / 2 + "B"
-                    + (zeroRate ? " · 费率也清零" : "") + "）");
-            for (String rn : rns) {
-                try {
-                    clData = Cloud.upload(session, xf, rn, cm);
-                    if (clData != null && !clData.isEmpty()) {
-                        lastRn = rn;
-                        rememberRn(rn);
-                        saveDevice();
-                        log("账单已上传，randomNumber=" + rn);
-                        break;
-                    }
-                } catch (Exception e) {
-                    if (msg(e).contains("226")) rejected = true;
-                    log("上传失败（" + rn + "）：" + msg(e));
-                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-                }
-            }
-            // 实验开关（费率也清零）被云端判 226 时，绝不能就这么放着：
-            // 没有 clearCode 就关不了阀，用户会一直放水。立刻退回标准零用量再传一次。
-            if (clData == null && zeroRate) {
-                log("实验开关被云端拒绝（226），改用标准零用量上传（保留费率）");
-                DebugLog.line("settle", "zero_rate 被拒，回退标准零用量");
-                String std = Protocol.zeroUsage(collectFull, false);
+            for (int mode : modes) {
+                if (clData != null) break;
+                String xf = Protocol.zeroUsage(collectFull, mode);
+                String tag = mode == 0 ? "标准·费率保留"
+                        : (mode == 1 ? "只清金额" : "金额+单价全清");
+                log("零用量流水已生成（" + xf.length() / 2 + "B · " + tag + "）");
+                int tried = 0;
+                int limit = mode == 0 ? rns.size() : 1;   // 试清费率的只试 1 个，别拖慢关阀
                 for (String rn : rns) {
+                    if (tried >= limit) break;
+                    tried++;
                     try {
-                        clData = Cloud.upload(session, std, rn, cm);
-                        if (clData != null && !clData.isEmpty()) {
+                        String got = Cloud.upload(session, xf, rn, cm);
+                        if (got != null && !got.isEmpty()) {
+                            clData = got;
                             lastRn = rn;
                             rememberRn(rn);
                             saveDevice();
-                            log("回退上传成功，randomNumber=" + rn);
+                            prefs.edit().putInt("zero_mode_ok", mode).apply();
+                            log("账单已上传（" + tag + "），randomNumber=" + rn);
+                            if (mode > 0) {
+                                prefs.edit().putInt("zero_rate_fail", 0).apply();
+                            }
                             break;
                         }
                     } catch (Exception e) {
-                        log("回退上传失败（" + rn + "）：" + msg(e));
-                        try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                        log("上传失败（" + tag + " / " + rn + "）：" + msg(e));
+                        try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
                     }
                 }
-                if (clData != null && !clData.isEmpty()) {
-                    // 这台设备的云端不吃「费率清零」：记两次就直接把开关关掉，免得下次又卡住
-                    int fails = prefs.getInt("zero_rate_fail", 0) + 1;
-                    prefs.edit().putInt("zero_rate_fail", fails).apply();
-                    if (fails >= 2) {
-                        prefs.edit().putBoolean("zero_rate", false)
-                                .putInt("zero_rate_fail", 0).apply();
-                        log("这台设备的云端拒绝费率清零，已自动关闭实验开关");
-                    }
+                if (clData == null && mode > 0 && zeroRate) {
+                    // 这个「清费率」的写法被云端拒了，继续试下一档
+                    DebugLog.line("settle", "模式 " + mode + " 被拒，换下一档");
                 }
-            } else if (rejected && !zeroRate) {
-                DebugLog.line("settle", "标准零用量也被判 226");
+            }
+            if (clData != null && zeroRate && prefs.getInt("zero_mode_ok", 0) == 0) {
+                // 开了实验开关但最后还是标准模式才过：说明这台云端不吃清费率
+                int fails = prefs.getInt("zero_rate_fail", 0) + 1;
+                prefs.edit().putInt("zero_rate_fail", fails).apply();
+                if (fails >= 2) {
+                    prefs.edit().putBoolean("zero_rate", false)
+                            .putInt("zero_rate_fail", 0).apply();
+                    log("这台设备的云端拒绝清费率，已自动关闭实验开关");
+                }
             }
         } catch (Exception e) {
             log("零用量上传失败：" + msg(e));
