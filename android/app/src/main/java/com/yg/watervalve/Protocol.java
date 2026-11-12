@@ -187,23 +187,37 @@ public final class Protocol {
     }
 
     public static String zeroUsage(String collectFull) {
-        return zeroUsage(collectFull, false);
+        return zeroUsage(collectFull, 0);
+    }
+
+    public static String zeroUsage(String collectFull, boolean zeroRate) {
+        return zeroUsage(collectFull, zeroRate ? 2 : 0);
     }
 
     /**
-     * 生成零用量上报流水。
+     * 生成零用量上报流水，可以指定「清到哪一层」：
+     * 0 = 只清 useCount + 预扣（费率原样，最容易被云端接受）
+     * 1 = 再清 rate1（金额），保留 rate2（单价）
+     * 2 = rate1 + rate2 一起清
      *
-     * @param zeroRate true = 连 rate1/rate2 一起清零。62B 新固件实测这样会被服务端
-     *                 判「226 加密校验失败」，但个别设备/云端把扣费金额放在 rate1 里，
-     *                 只清 useCount 仍然照扣 —— 留给用户按设备试。
+     * 62B 新固件实测：清费率可能被服务端判 226「加密校验失败」，
+     * 但个别云端把扣费金额放在 rate1 里，只清 useCount 照样扣钱 —— 按设备试。
      */
-    public static String zeroUsage(String collectFull, boolean zeroRate) {
+    public static String zeroUsage(String collectFull, int mode) {
         Flow f = parseFlow(collectFull);
         if (!f.ok) throw new IllegalArgumentException("流水长度不足 " + FLOW_BASE_LEN + "B");
-        boolean keepRate = !zeroRate && f.ext != null && !f.ext.isEmpty();
+        boolean hasExt = f.ext != null && !f.ext.isEmpty();
+        String rates;
+        if (mode <= 0) {
+            rates = hasExt ? f.rate1 + f.rate2 : "0000000000000000";
+        } else if (mode == 1) {
+            rates = "00000000" + f.rate2;      // 只清金额
+        } else {
+            rates = "0000000000000000";
+        }
         return (f.status + f.time + f.productId + f.deviceId + f.accountId
                 + f.accountType + "0000000000000000"
-                + (keepRate ? f.rate1 + f.rate2 : "0000000000000000")
+                + rates
                 + f.mac + f.ext).toUpperCase();
     }
 
