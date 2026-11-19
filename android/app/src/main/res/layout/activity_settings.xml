@@ -634,6 +634,15 @@
                         android:textColor="@color/primary"
                         android:textSize="13sp" />
                 </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="说明：86 清账串是逆向试出来的，大部分机型都对不上（设备回 81）——对不上时会等设备自行结算，这一单可能仍然按真实用量扣费。开阀、关阀、读状态不受影响。"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>
