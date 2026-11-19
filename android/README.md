@@ -1,6 +1,22 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.19）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.20）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.20 实测 103B 流水：前 42 字节布局完全一致（2026-11-19）
+
+现场样本（103B）：
+
+```
+80 261118200729 00001117 00000114 000003C4 02  00000001 000008B5 000000D9 0000001F  C47F0A026F3A  ext(61B)
+   status/time   product  device   account  aT  useCount 预扣2229  rate1=217 rate2=31  mac
+```
+
+`rate1 / rate2 = 217 / 31 = 7.00 L`，和 62B 的规则一致 → **不是新协议，只是扩展段更长**。
+
+- `knownLen` 改为 `flowLen == 42 || flowLen >= 62`，103B 走正常「基础段 + 扩展段」流程
+- 改写被拒时对 `flowLen > 62` 增加「原样上报」兜底
+- 这类固件的 23 帧 deviceId 全 0（样本：`80000000000000000000 0003C4 …`），
+  新增 `deviceIdFromFlow()`：从 85 流水补 `deviceId`，补不到才沿用上次认定的，不再直接「deviceId 无效」中止
 
 ## 0.12.19 支持非 42/62 字节的流水（2026-11-19）
 
@@ -437,7 +453,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.19（versionCode 79），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.20（versionCode 80），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

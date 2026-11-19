@@ -204,6 +204,20 @@ public final class ValveManager {
     public String getDeviceName() { return deviceName; }
     public boolean isRunning() { return running; }
 
+    /** 从 85 流水里取 deviceId（个别固件的 23 帧不填），取不到返回 0 */
+    private int deviceIdFromFlow() {
+        try {
+            Protocol.Frame f = ble.sendAndWait("85", "00", 8000);
+            Protocol.Flow flow = Protocol.parseFlow(Protocol.normHex(f.dataArea));
+            if (!flow.ok) return 0;
+            DebugLog.line("order", "85 流水补 deviceId：" + flow.deviceId + " len=" + flow.len);
+            return Integer.parseInt(flow.deviceId, 16);
+        } catch (Exception e) {
+            DebugLog.line("order", "85 补 deviceId 失败：" + msg(e));
+            return 0;
+        }
+    }
+
     /** 开阀成功后：后台采一帧真实低额流水（不阻塞开关水） */
     private void startLowFlowCapture() {
         if (!prefs.getBoolean("low_flow", false)) return;
@@ -679,7 +693,16 @@ public final class ValveManager {
         }
         int curDev = q.deviceIdInt();
         if (curDev <= 0) {
-            log("设备 deviceId 无效");
+            // 103B 这类固件的 23 帧不填 deviceId（全 0），但 85 流水里有 —— 补一次
+            curDev = deviceIdFromFlow();
+            if (curDev > 0) log("23 帧没带 deviceId，从 85 流水取到 " + curDev);
+        }
+        if (curDev <= 0) {
+            curDev = devId;               // 还取不到就沿用上次认定的
+            if (curDev > 0) log("仍取不到 deviceId，沿用上次认定的 " + curDev);
+        }
+        if (curDev <= 0) {
+            log("设备 deviceId 无效（23 与 85 都没给），开阀中止");
             return;
         }
         if (devId > 0 && devId != curDev) {
@@ -937,9 +960,8 @@ public final class ValveManager {
         boolean zeroRate = prefs.getBoolean("zero_rate", false);
         Cloud.lastConsumeMoney = -1;
         int flowLen = collectFull.length() / 2;
-        boolean knownLen = flowLen == 42 || flowLen == 62;
-        // ⓪ 未知长度（比如 103B）：一个字节都不改，原样上报。
-        //    这种固件的字段偏移可能和 42/62B 不同，硬改只会 226 或写坏数据。
+        boolean knownLen = flowLen == 42 || flowLen >= 62;
+        // ⓪ 长度 <62 且不是 42（极罕见）：偏移一定不同，一个字节都不改，原样上报。
         if (!knownLen) {
             log("流水长度 " + flowLen + "B（非 42/62），不做改写，原样上报");
             DebugLog.line("settle", "未知流水长度 " + flowLen + "B，原样上报：" + collectFull);
@@ -1047,6 +1069,27 @@ public final class ValveManager {
                     prefs.edit().putBoolean("zero_rate", false)
                             .putInt("zero_rate_fail", 0).apply();
                     log("这台设备的云端拒绝清费率，已自动关闭实验开关");
+                }
+            }
+            // 103B 这类长扩展段型号：实测前 42B 布局完全一致，
+            // 但扩展段尾部的签名可能覆盖了计费字段。所有改写都被拒时，退回原样上报。
+            if (clData == null && flowLen > 62) {
+                log("零用量改写被拒，" + flowLen + "B 流水改用原样上报");
+                for (String rn : rns) {
+                    try {
+                        String got = Cloud.upload(session, collectFull, rn, cm);
+                        if (got != null && !got.isEmpty()) {
+                            clData = got;
+                            lastRn = rn;
+                            rememberRn(rn);
+                            saveDevice();
+                            log("原样上传成功，randomNumber=" + rn);
+                            break;
+                        }
+                        log("原样上传返回空（" + rn + "）");
+                    } catch (Exception e) {
+                        log("原样上传失败（" + rn + "）：" + msg(e));
+                    }
                 }
             }
         } catch (Exception e) {
