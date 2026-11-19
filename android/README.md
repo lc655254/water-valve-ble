@@ -1,6 +1,17 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.18）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.19）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.19 支持非 42/62 字节的流水（2026-11-19）
+
+现场反馈有表报 **103B** 流水。这类型号的字段偏移未必还是「前 42 字节那套」，
+按 62B 的假设去重拼只会 226 或把数据写坏。
+
+- `settleInternal()`：`flowLen` 不是 42/62 时**一个字节都不改，原样上传**
+  （日志：`流水长度 103B（非 42/62），不做改写，原样上报`），失败再退回标准流程
+- `Protocol.parseFlow` 本来就按「≥42B 解析、84B 之后全算 ext」处理，长度不失真
+- `clearCandidates` 的候选全部按实际长度生成（含 status 全长 / 去 status 全长），103B 也在内
+- Windows 1.0.23 同步同一规则（`zero_usage` 对未知长度直接返回原帧）
 
 ## 0.12.18 低额流水实验（2026-11-19）
 
@@ -426,7 +437,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.18（versionCode 78），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.19（versionCode 79），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 

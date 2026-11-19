@@ -936,9 +936,33 @@ public final class ValveManager {
         String clData = null;
         boolean zeroRate = prefs.getBoolean("zero_rate", false);
         Cloud.lastConsumeMoney = -1;
+        int flowLen = collectFull.length() / 2;
+        boolean knownLen = flowLen == 42 || flowLen == 62;
+        // ⓪ 未知长度（比如 103B）：一个字节都不改，原样上报。
+        //    这种固件的字段偏移可能和 42/62B 不同，硬改只会 226 或写坏数据。
+        if (!knownLen) {
+            log("流水长度 " + flowLen + "B（非 42/62），不做改写，原样上报");
+            DebugLog.line("settle", "未知流水长度 " + flowLen + "B，原样上报：" + collectFull);
+            for (String rn : rns) {
+                try {
+                    String got = Cloud.upload(session, collectFull, rn, cm);
+                    if (got != null && !got.isEmpty()) {
+                        clData = got;
+                        lastRn = rn;
+                        rememberRn(rn);
+                        saveDevice();
+                        log("原样上传成功，randomNumber=" + rn);
+                        break;
+                    }
+                    log("原样上传返回空（" + rn + "）");
+                } catch (Exception e) {
+                    log("原样上传失败（" + rn + "）：" + msg(e));
+                }
+            }
+        }
         // ① 优先：开阀时采到的那帧「真实低额流水」原样上报（一个字节都不改，云端校验能过）
         boolean usedLow = false;
-        if (!lowFlowDone && lowFlowHex != null && prefs.getBoolean("low_flow", false)) {
+        if (clData == null && !lowFlowDone && lowFlowHex != null && prefs.getBoolean("low_flow", false)) {
             usedLow = true;
             lowFlowDone = true;
             log("先按低额流水上报（rate1=" + lowFlowRate1 + " 厘，原样不改字节）");
