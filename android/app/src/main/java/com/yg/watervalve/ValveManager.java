@@ -75,6 +75,15 @@ public final class ValveManager {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ExecutorService nameIo = Executors.newSingleThreadExecutor();
+
+    // ── 低额流水实验 ────────────────────────────────────────────
+    // 开阀后采一帧真实（金额很小、但 MAC 合法）的 85 流水，关水时原样上报：
+    // 不改任何字节，云端校验能过，按帧里的 rate1 结算 ≈ 几分钱。
+    private volatile String lowFlowHex;
+    private volatile String lowFlowRn;
+    private volatile int lowFlowRate1 = -1;
+    private volatile boolean capturingLowFlow;
+    private boolean lowFlowDone;          // 本次关水已经用过低额流水（防递归/防重复）
     private final BleClient ble;
     private final BluetoothAdapter adapter;
     private final List<ScanItem> devices = new ArrayList<>();
@@ -194,6 +203,66 @@ public final class ValveManager {
     public String getMac() { return mac; }
     public String getDeviceName() { return deviceName; }
     public boolean isRunning() { return running; }
+
+    /** 开阀成功后：后台采一帧真实低额流水（不阻塞开关水） */
+    private void startLowFlowCapture() {
+        if (!prefs.getBoolean("low_flow", false)) return;
+        lowFlowHex = null;
+        lowFlowRn = null;
+        lowFlowRate1 = -1;
+        lowFlowDone = false;
+        Thread t = new Thread(this::captureLowFlow, "low-flow");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * 采一帧「真实但金额很小」的 85 流水并留存。
+     *
+     * 为什么：云端校验 62B 流水里的 rate1（改 0 就 226），但整数帧原样上报是通的。
+     * 所以在开阀后几秒内采一帧（那时 rate1 只有几分钱甚至 0），关水时把它原样传上去，
+     * 结算金额就是那一帧的金额，不是这一整段的真实用量。
+     */
+    private void captureLowFlow() {
+        int delay = prefs.getInt("low_flow_delay", 6);
+        try {
+            Thread.sleep(delay * 1000L);
+        } catch (InterruptedException ignored) {
+            return;
+        }
+        if (!running || closing) {
+            DebugLog.line("lowflow", "跳过采集：running=" + running + " closing=" + closing);
+            return;
+        }
+        capturingLowFlow = true;
+        try {
+            Protocol.Frame f = ble.sendAndWait("85", "00", 8000);
+            String rc = f.dataArea.length() >= 2 ? f.dataArea.substring(0, 2) : "";
+            if (!"80".equals(rc)) {
+                DebugLog.line("lowflow", "85 采集返回码 " + rc + "，放弃");
+                log("低额流水：85 返回码 " + rc + "，本次不留存");
+                return;
+            }
+            String hex = Protocol.normHex(f.dataArea);
+            Protocol.Flow flow = Protocol.parseFlow(hex);
+            String rn = null;
+            try {
+                rn = ble.queryStatus().tacTimes;
+            } catch (Exception ignored) {
+            }
+            lowFlowHex = hex;
+            lowFlowRn = rn;
+            lowFlowRate1 = flow.rate1I;
+            DebugLog.line("lowflow", "留存流水 rate1=" + flow.rate1I + " useCount=" + flow.useCountI
+                    + " rn=" + rn + " hex=" + hex);
+            log("低额流水已留存：rate1=" + flow.rate1I + " 厘 · 计数=" + flow.useCountI
+                    + " · 关水时原样上报");
+        } catch (Exception e) {
+            DebugLog.line("lowflow", "采集失败：" + msg(e));
+        } finally {
+            capturingLowFlow = false;
+        }
+    }
 
     /** 金额上限（元），0 = 不限制 */
     public double budgetYuan() {
@@ -709,6 +778,7 @@ public final class ValveManager {
                 DebugLog.line("order", "放水确认 onCharge=" + q2.onCharge + " 开阀时刻=" + openTs);
                 logSnapshot("放水开始");
                 logBalanceNow("放水开始");
+                startLowFlowCapture();
                 return;
             }
             log("轮询 " + i + "：onCharge=" + q2.onCharge + "，等待…");
@@ -813,6 +883,11 @@ public final class ValveManager {
                 try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
             }
         }
+        if (collectFull == null && lowFlowHex != null) {
+            // 有的固件「85 采集」读完就把记录清了，关水时再读会拿不到 —— 用留存那帧顶上
+            collectFull = lowFlowHex;
+            log("关水时 85 没取到，改用开阀时留存的那帧流水");
+        }
         if (collectFull == null) {
             try {
                 Protocol.Query q = ble.queryStatus();
@@ -861,6 +936,32 @@ public final class ValveManager {
         String clData = null;
         boolean zeroRate = prefs.getBoolean("zero_rate", false);
         Cloud.lastConsumeMoney = -1;
+        // ① 优先：开阀时采到的那帧「真实低额流水」原样上报（一个字节都不改，云端校验能过）
+        boolean usedLow = false;
+        if (!lowFlowDone && lowFlowHex != null && prefs.getBoolean("low_flow", false)) {
+            usedLow = true;
+            lowFlowDone = true;
+            log("先按低额流水上报（rate1=" + lowFlowRate1 + " 厘，原样不改字节）");
+            java.util.LinkedHashSet<String> tryRn = new java.util.LinkedHashSet<>();
+            if (lowFlowRn != null && !lowFlowRn.isEmpty()) tryRn.add(lowFlowRn);
+            tryRn.addAll(rns);
+            for (String rn : tryRn) {
+                try {
+                    String got = Cloud.upload(session, lowFlowHex, rn, cm);
+                    if (got != null && !got.isEmpty()) {
+                        clData = got;
+                        lastRn = rn;
+                        rememberRn(rn);
+                        saveDevice();
+                        log("低额流水上传成功，randomNumber=" + rn);
+                        break;
+                    }
+                    log("低额流水上传返回空（" + rn + "）");
+                } catch (Exception e) {
+                    log("低额流水上传失败（" + rn + "）：" + msg(e));
+                }
+            }
+        }
         // 尝试顺序：上次成功的模式 → 只清金额(1) →（开关开着时）金额+单价(2) → 标准(0)
         // 云端一旦对「清金额」判过 226，就记住这台表不吃这套，之后直接走标准，别每次白试
         java.util.LinkedHashSet<Integer> modes = new java.util.LinkedHashSet<>();
@@ -966,6 +1067,12 @@ public final class ValveManager {
                 publishQuery(q);
             } catch (Exception ignored) {
             }
+        }
+        if (clearBy == null && usedLow) {
+            // 低额流水的 clearCode 清不动设备里真实那条流水：退回真实流水再结一次，
+            // 保证阀一定关得上（宁可扣这一笔，也不能让水一直流）
+            log("低额流水的 clearCode 对不上设备，改按真实流水重结一次");
+            return settleInternal();
         }
         return false;
     }

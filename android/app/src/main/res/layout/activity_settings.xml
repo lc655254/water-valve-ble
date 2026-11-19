@@ -189,6 +189,37 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:text="低额流水：留一帧真实小额，关水时原样上报"
+                        android:textColor="@color/ink"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/lowFlowSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/primary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="2dp"
+                    android:text="开阀约 6 秒后采一帧真实的 85 流水（那时金额只有几分钱），关水时原样传上去，一个字节都不改——云端校验能过，结算按那一帧算。若 86 清不动设备，会自动退回真实流水重结，不会卡住关阀。"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
                         android:text="零用量时把费率也清零"
                         android:textColor="@color/ink"
                         android:textSize="13sp" />

@@ -110,9 +110,26 @@ public class SettingsActivity extends Activity {
             }
         });
 
+        // 实验：低额流水（开阀后留一帧真实小额，关水时原样上报）
+        TextView lowFlow = findViewById(R.id.lowFlowSwitch);
+        if (lowFlow != null) {
+            final String KEY = "low_flow";
+            boolean on = getSharedPreferences("water_valve", MODE_PRIVATE).getBoolean(KEY, false);
+            lowFlow.setText(on ? "已开启" : "关闭");
+            lowFlow.setTextColor(getColor(on ? R.color.success : R.color.muted));
+            lowFlow.setOnClickListener(v -> {
+                boolean now = !getSharedPreferences("water_valve", MODE_PRIVATE).getBoolean(KEY, false);
+                getSharedPreferences("water_valve", MODE_PRIVATE).edit().putBoolean(KEY, now).apply();
+                DebugLog.line("prefs", "低额流水 = " + now);
+                lowFlow.setText(now ? "已开启" : "关闭");
+                lowFlow.setTextColor(getColor(now ? R.color.success : R.color.muted));
+                toast(now ? "已开启：开阀后留一帧真实小额，关水时原样上报"
+                        : "已关闭：按真实流水结算");
+            });
+        }
+
         // 实验开关：零用量时连费率一起清零
-        TextView zeroRate = findViewById(R.id.zeroRateSwitch);
-        if (zeroRate != null) {
+        TextView zeroRate = findViewById(R.id.zeroRateSwitch);        if (zeroRate != null) {
             final String KEY = "zero_rate";
             boolean on = getSharedPreferences("water_valve", MODE_PRIVATE).getBoolean(KEY, false);
             zeroRate.setText(on ? "已开启" : "关闭");

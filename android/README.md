@@ -1,6 +1,20 @@
 # 蓝牙水库 · Android
 
-KLCXKJ-Water 水表的安卓控制端（0.12.17）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+KLCXKJ-Water 水表的安卓控制端（0.12.18）。手机直接通过 BLE 连表，不依赖电脑；支持趣智校园宿舍名和带图片缓存的 GitHub 公告弹窗。
+
+## 0.12.18 低额流水实验（2026-11-19）
+
+云端校验 62B 流水里的 `rate1`（改 0 就 226），但**原样不改字节的帧是能过的**。
+所以换个思路：开阀后 6 秒采一帧真实的 85 流水（那时 `rate1` 只有几分钱甚至 0），
+关水时把它原样传上去 —— 结算金额就是那一帧的金额。
+
+- `startLowFlowCapture()` / `captureLowFlow()`：开阀成功后起后台线程，6 秒后 `85` 采一帧，
+  顺手记下当时的 `tacTimes`（randomNumber）与 `rate1`
+- `settleInternal()` 先试低额流水：先用留存帧的 randomNumber，再按历史候选逐个试
+- 上传成功后照常 `86` 清账 —— 设备里真实那条流水被清掉，4G 表也就没东西可自己上报
+- 兜底 1：`86` 清不动（`clearBy == null`）→ 自动 `return settleInternal()` 按真实流水重结一次
+- 兜底 2：有的固件「85 读完就清记录」，关水时 85 取不到 → 用留存那帧顶上
+- 开关：设置 → 实验 → 「低额流水」，默认关闭；日志搜 `lowflow`
 
 ## 0.12.17 金额上限 + 三档结论（2026-11-12）
 
@@ -412,7 +426,7 @@ apksigner sign --ks your.jks --ks-key-alias your-alias --out app-release.apk app
 - BLE 断开后会自动重连（最多 20 次），重连成功先补零用量关阀。
 - 进程被系统强杀时无法执行关阀；前台服务只能降低概率。后续会加更硬的保底。
 - 云端零用量结算依赖账号会话；会话失效需重新登录。
-- APK 版本 0.12.17（versionCode 77），`minSdk 26`（Android 8+），`targetSdk 35`。
+- APK 版本 0.12.18（versionCode 78），`minSdk 26`（Android 8+），`targetSdk 35`。
 
 ## 安全说明
 
